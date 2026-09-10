@@ -1,0 +1,10 @@
+saga-region.jpg and all district maps (hokutozawa, yokono-industrial, saga,
+yokono, misamoto, yachihida-east, yachihida-west, sakahida, onomaki, takiru,
+metro-district, highlands, kabuki):
+
+Basemap attribution:
+Esri, Maxar, Earthstar Geographics, and the GIS User Community
+Contains data © OpenStreetMap contributors (ODbL) via the ArcGIS Online
+World Dark Gray Canvas base map (label-free), recoloured for this project.
+
+afterlight-city.jpg and takahana-island.jpg: user-provided artwork.
