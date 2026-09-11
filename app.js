@@ -14,33 +14,34 @@ const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = se
 
 const COLORS = ['#5df2c0','#4fc3ff','#ffd166','#ff6b81','#b388ff','#ff9f43','#7bed9f','#f368e0','#48dbfb','#e8edf2',
                 '#ff4b3e','#33d17a','#f1fa8c','#a29bfe','#fd7f2c','#00d4d8','#ef476f','#9dff57','#8d99ae','#c77dff'];
-const LS_KEY = 'afterlightTracker.v1';
+const LS_KEY = 'virtusTracker.v1';
 
+/* Rosebridge master (11776x11264) is split into a moderate-res OVERVIEW
+   plus a 3x3 grid of native-resolution SECTOR maps. Each sector is ~9x
+   lighter to decode than the full map, so panning/zooming stays smooth.
+   box = [x0, y0] in master pixels (see tools/build_sectors.py). */
+const SECTORS = [
+  ['a1', 0, 0], ['a2', 3925, 0], ['a3', 7851, 0],
+  ['b1', 0, 3754], ['b2', 3925, 3754], ['b3', 7851, 3754],
+  ['c1', 0, 7509], ['c2', 3925, 7509], ['c3', 7851, 7509],
+];
 const BUILTIN_MAPS = [
-  { id: 'afterlight-city', name: 'Afterlight City (Overview)', src: 'maps/afterlight-city.jpg' },
-  { id: 'metro-district',  name: 'Afterlight Metropolitan District', src: 'maps/metro-district.jpg' },
-  { id: 'hokutozawa',      name: 'Hokutozawa',                 src: 'maps/hokutozawa.jpg' },
-  { id: 'kabuki',          name: 'Kabuki',                     src: 'maps/kabuki.jpg' },
-  { id: 'onomaki',         name: 'Onomaki',                    src: 'maps/onomaki.jpg' },
-  { id: 'saga',            name: 'Saga',                       src: 'maps/saga.jpg' },
-  { id: 'saga-region',     name: 'Saga Region (Wide Area)',    src: 'maps/saga-region.jpg' },
-  { id: 'sakahida',        name: 'Sakahida',                   src: 'maps/sakahida.jpg' },
-  { id: 'takahana-island', name: 'Takahana Island',            src: 'maps/takahana-island.jpg' },
-  { id: 'takiru',          name: 'Takiru',                     src: 'maps/takiru.jpg' },
-  { id: 'yachihida-east',  name: 'Yachihida East',             src: 'maps/yachihida-east.jpg' },
-  { id: 'yachihida-west',  name: 'Yachihida West',             src: 'maps/yachihida-west.jpg' },
-  { id: 'yokono',          name: 'Yokono',                     src: 'maps/yokono.jpg' },
-  { id: 'yokono-industrial', name: 'Yokono Industrial Sector', src: 'maps/yokono-industrial.jpg' },
-  { id: 'misamoto',        name: 'Misamoto',                   src: 'maps/misamoto.jpg' },
-  { id: 'highlands',       name: 'Highlands',                  src: 'maps/highlands.jpg' },
+  { id: 'rosebridge', name: 'Rosebridge — Overview', src: 'maps/rosebridge_overview.jpg',
+    thumb: 'maps/rosebridge_thumb.jpg', overview: true, menu: 'maps/rosebridge_menu.jpg' },
+  ...SECTORS.map(([n, x0, y0]) => ({
+    id: 'rosebridge-' + n, name: 'Sector ' + n.toUpperCase(),
+    src: `maps/sectors/rosebridge_${n}.jpg`, thumb: `maps/sectors/thumb_${n}.jpg`,
+    sector: n, box: [x0, y0],
+  })),
 ];
 
 
 
 /* ───────── element refs ───────── */
-const viewport   = $('#viewport'), world = $('#world'), mapImg = $('#mapImg');
+const viewport   = $('#viewport'), world = $('#world'), mapImg = $('#mapImg'), tileLayer = $('#tileLayer');
 const markerLayer = $('#markerLayer'), pingLayer = $('#pingLayer'), locLayer = $('#locLayer');
 const hud = $('#hud');
+const shadeLayer = $('#shadeLayer');
 const pop = $('#pop'), veil = $('#veil'), hint = $('#hint'), coordsBox = $('#coords');
 
 /* ───────── state ───────── */
@@ -79,8 +80,8 @@ function ensureBuiltins() {
 }
 
 const mData = id => {
-  const d = (state.data[id] ||= { characters: [], pings: [], locations: [] });
-  d.characters ||= []; d.pings ||= []; d.locations ||= [];
+  const d = (state.data[id] ||= { characters: [], pings: [], locations: [], shades: [] });
+  d.characters ||= []; d.pings ||= []; d.locations ||= []; d.shades ||= [];
   return d;
 };
 const curData = () => mData(state.current);
@@ -148,86 +149,77 @@ function persistNow() {
 }
 const persist = debounce(persistNow, 350);
 
-/* ───────── timeline calendar (2085–2100) ─────────
-   Each calendar date owns a layer of character POSITIONS and PINGS
-   (story locations). The character roster and fixed Locations are
-   global — they stay on every date. Switching date saves the current
-   layer into its bucket and loads the target date's (empty = cleared).
-   Key '' = “no date” = the legacy, everything-shown bucket. */
-const CAL = {
-  yearMin: 2085, yearMax: 2100,
-  view: { y: 2085, m: 0 },           // month being browsed in the drawer (not committed)
-};
-let pendingPlace = null;             // charId waiting for a map click to be placed on the active date
+/* ───────── legacy timeline data (calendar was removed) ─────────
+   Old boards stored per-date buckets. They are flattened into the
+   global layer once (see migrateRosebridgeSectors) and no longer
+   surfaced anywhere in the UI. The structure is kept only so the
+   sync layer can keep ignoring/merging stray tl@ docs safely. */
+let pendingPlace = null;             // charId waiting for a map click to be placed
 
-const activeKey = () => (state.calendar?.selected ?? '');
-const isoKey = (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-
-function ensureTimeline() {
-  state.timeline ||= {};
-  state.calendar ||= { selected: '' };
-  state.calendar.selected ||= '';
-}
-const ensureBucket = key => (state.timeline[key] ||= { posByMap: {}, pingsByMap: {} });
-
-/* copy LIVE working set → the active date's bucket (non-destructively composited for sync) */
-function deriveDateBucket() {
-  const posByMap = {}, pingsByMap = {};
-  for (const [mid, d] of Object.entries(state.data)) {
-    const pos = {};
-    for (const c of (d.characters || [])) if (!c.unplaced) pos[c.id] = { x: c.x, y: c.y };
-    if (Object.keys(pos).length) posByMap[mid] = pos;
-    if (d.pings?.length) pingsByMap[mid] = JSON.parse(JSON.stringify(d.pings));
-  }
-  return { posByMap, pingsByMap };
-}
-function saveWorkingDate() {
-  state.timeline[activeKey()] = deriveDateBucket();
-}
-function loadDate(key) {
-  const b = state.timeline[key] || { posByMap: {}, pingsByMap: {} };
-  for (const [mid, d] of Object.entries(state.data)) {
-    for (const c of (d.characters || [])) {
-      const p = b.posByMap[mid]?.[c.id];
-      if (p) { c.x = p.x; c.y = p.y; c.unplaced = false; }
-      else { c.unplaced = true; delete c.x; delete c.y; }   // no stale coords to resurrect later
-    }
-    d.pings = JSON.parse(JSON.stringify(b.pingsByMap[mid] || []));
-  }
-}
-function switchDate(key) {
-  ensureTimeline();
-  if (key === activeKey()) return;
-  // date switching is not undoable — purge history so a restore can't
-  // resurrect positions under the wrong timeline
-  undoStack.length = 0; redoStack.length = 0; updateUndoButtons();
-  saveWorkingDate();
-  state.calendar.selected = key;
-  loadDate(key);
-  pendingPlace = null;
-  sel = null; closePop();
-  persist(); renderAll(); updateCalTag();
-  toast(key === '' ? 'TIMELINE: NO DATE — ATLAS VIEW (LOCATIONS & STORY PINGS ONLY)'
-    : `TIMELINE SET — ${key} (CHARACTER POSITIONS & PINGS CLEARED FOR THIS DATE)`, 'green');
-}
-function dateHasPing(key) {
-  // the ACTIVE date's pings live in the working data, not the stored bucket
-  if (key === activeKey())
-    return Object.values(state.data).some(d => (d?.pings || []).length > 0);
-  const b = state.timeline?.[key];
-  if (!b) return false;
-  return Object.values(b.pingsByMap || {}).some(arr => arr && arr.length);
-}
-function updateCalTag() {
-  const tag = $('#calTag');
-  if (tag) tag.textContent = activeKey() === '' ? 'NO DATE' : activeKey();
-}
-
-/* scrub a deleted character from every date bucket */
+/* scrub a deleted character from any leftover timeline bucket */
 function scrubCharEverywhere(id) {
   for (const b of Object.values(state.timeline || {})) {
     for (const pos of Object.values(b.posByMap || {})) delete pos[id];
   }
+}
+
+/* One-time migration: flatten timeline buckets into the global layer,
+   then split the old full-map 'rosebridge' content (11776x11264 pixel
+   space) into the 9 sector maps at sector-local coordinates. */
+function migrateRosebridgeSectors() {
+  state.mig ||= {};
+  if (state.mig.rosebridgeSectors) return;
+  // 1) flatten every dated bucket into the live global layer
+  for (const [key, b] of Object.entries(state.timeline || {})) {
+    if (key === '' || !b) continue;
+    for (const [mid, pos] of Object.entries(b.posByMap || {})) {
+      const d = mData(mid);
+      for (const [cid, p] of Object.entries(pos || {})) {
+        const c = d.characters.find(x => x.id === cid);
+        if (c && (c.unplaced || typeof c.x !== 'number')) { c.x = p.x; c.y = p.y; c.unplaced = false; }
+      }
+    }
+    for (const [mid, pings] of Object.entries(b.pingsByMap || {})) {
+      const d = mData(mid), seen = new Set(d.pings.map(p => p.id));
+      for (const p of (pings || [])) if (p && p.id != null && !seen.has(p.id)) { d.pings.push(p); seen.add(p.id); }
+    }
+  }
+  state.timeline = {};
+  delete state.calendar;
+  // 2) split old full-map content into sectors (old coords = master pixels)
+  const X0 = [0, 3925, 7851], Y0 = [0, 3754, 7509];
+  const WC = [3925, 3926, 3925], HC = [3754, 3755, 3755];
+  const rb = state.data.rosebridge;
+  if (rb) {
+    const route = (e, lists) => {
+      if (typeof e.x !== 'number' || typeof e.y !== 'number') { lists.keep.push(e); return; }
+      const c = e.x >= X0[2] ? 2 : e.x >= X0[1] ? 1 : 0;
+      const r = e.y >= Y0[2] ? 2 : e.y >= Y0[1] ? 1 : 0;
+      e.x = Math.min(Math.max(e.x - X0[c], 0), WC[c]);
+      e.y = Math.min(Math.max(e.y - Y0[r], 0), HC[r]);
+      lists['abc'[r] + (c + 1)].push(e);
+    };
+    const bucketize = list => {
+      const lists = { keep: [], a1: [], a2: [], a3: [], b1: [], b2: [], b3: [], c1: [], c2: [], c3: [] };
+      for (const e of (list || [])) route(e, lists);
+      return lists;
+    };
+    const chLists = bucketize(rb.characters);
+    const loLists = bucketize(rb.locations);
+    const piLists = bucketize(rb.pings);
+    for (const k of ['a1', 'a2', 'a3', 'b1', 'b2', 'b3', 'c1', 'c2', 'c3']) {
+      const d = mData('rosebridge-' + k);
+      if (chLists[k].length) d.characters.push(...chLists[k]);
+      if (loLists[k].length) d.locations.push(...loLists[k]);
+      if (piLists[k].length) d.pings.push(...piLists[k]);
+    }
+    rb.characters = chLists.keep;   // unplaced roster chars stay on the overview
+    rb.locations = loLists.keep;
+    rb.pings = piLists.keep;
+  }
+  delete state.views.rosebridge;
+  for (const k of ['a1', 'a2', 'a3', 'b1', 'b2', 'b3', 'c1', 'c2', 'c3']) delete state.views['rosebridge-' + k];
+  state.mig.rosebridgeSectors = 1;
 }
 
 /* world → viewport screen coords (for placing popovers without a mouse event) */
@@ -245,73 +237,12 @@ function relayoutMarkers() {
 }
 const mapNameOf = mid => (state.maps[mid]?.name || mid);
 
-/* ───────── dated “ghost” pings in NO DATE view ─────────
-   When no date is active, every ping stored in every date bucket
-   appears as a read-only ghost marker, labelled with its date.
-   Clicking it offers a jump straight into that date. Ghosts are a
-   pure view — they never enter the live working set (d.pings stays
-   the genuine NO-DATE layer), so nothing leaks into other dates. */
-function ghostPings() {
-  if (activeKey() !== '') return [];
-  const out = [], seen = new Set();
-  const mid = state.current;
-  for (const key of Object.keys(state.timeline || {}).filter(k => k !== '').sort()) {
-    for (const p of (state.timeline[key]?.pingsByMap?.[mid] || [])) {
-      if (!p || p.id == null || seen.has(p.id)) continue;
-      seen.add(p.id);
-      out.push({ ...p, ghostDate: key });
-    }
-  }
-  return out;
-}
-function openGhostPingPop(p, px, py) {
-  openPop(el => {
-    popHeader(el, `◷ ${p.ghostDate}`);
-    const note = document.createElement('div');
-    note.className = 'pop-ghost-note';
-    note.innerHTML = `<div class="pop-ghost-name">${esc(p.label || 'PING')}</div>
-      <div class="pop-ghost-sub">THIS STORY PING EXISTS ON ${esc(p.ghostDate)}</div>`;
-    el.appendChild(note);
-    const act = document.createElement('div');
-    act.className = 'pop-actions';
-    act.innerHTML = `<button class="pbtn" data-a="centre">⌖ CENTRE</button>
-      <button class="pbtn amber" data-a="go">◷ PROCEED TO ${esc(p.ghostDate)}</button>`;
-    act.addEventListener('click', e => {
-      const a = e.target.closest('[data-a]')?.dataset.a;
-      if (a === 'centre') centerOn(p.x, p.y);
-      if (a === 'go') {
-        const id = p.id;
-        closePop();
-        switchDate(p.ghostDate);
-        const live = curData().pings.find(x => String(x.id) === String(id));
-        if (live) {
-          selectPing(live.id);
-          centerOn(live.x, live.y);
-          const s = w2s(live.x, live.y);
-          openPingPop(live, s.px, s.py);
-        } else {
-          toast('THAT PING NO LONGER EXISTS ON ' + p.ghostDate, 'red');
-        }
-      }
-    });
-    el.appendChild(act);
-  }, px, py);
-}
-
-/* nudge users to the calendar — characters live on dates, not on NO DATE */
-function guidePickDate(c) {
-  toast(c ? `${c.name.toUpperCase()} LIVES ON DATES — PICK ONE TO PLACE IT`
-          : 'CHARACTERS ARE PLACED ON DATES — PICK A DATE FIRST', 'amber');
-  openCalDrawer();
-}
-
-/* ───────── pending placement (put roster character on the active date) ───────── */
+/* ───────── pending placement (put roster character on the map) ───────── */
 function beginPlacement(charId) {
-  if (activeKey() === '') { guidePickDate(curData().characters.find(x => x.id === charId)); return; }
   pendingPlace = charId;
   closePop();
   const c = curData().characters.find(x => x.id === charId);
-  toast(`CLICK THE MAP TO PLACE ${c ? c.name.toUpperCase() : 'CHARACTER'} ON ${activeKey() || 'THIS DATE'}`, 'amber');
+  toast(`CLICK THE MAP TO PLACE ${c ? c.name.toUpperCase() : 'CHARACTER'}`, 'amber');
   viewport.style.cursor = 'crosshair';
 }
 function cancelPlacement() {
@@ -321,7 +252,6 @@ function cancelPlacement() {
   renderSidebar();
 }
 function placePendingAt(mx, my) {
-  if (activeKey() === '') { pendingPlace = null; viewport.style.cursor = ''; return; }
   const c = curData().characters.find(x => x.id === pendingPlace);
   pendingPlace = null;
   viewport.style.cursor = '';
@@ -329,7 +259,7 @@ function placePendingAt(mx, my) {
   pushHistory();
   c.x = mx; c.y = my; c.unplaced = false;
   sel = { type: 'char', id: c.id };
-  persist(); renderAll(); updateCalTag();
+  persist(); renderAll();
   toast('CHARACTER POSITIONED', 'green');
 }
 /* ───────── history (undo / redo) ───────── */
@@ -363,11 +293,62 @@ function updateUndoButtons() {
   $('#btnRedo').disabled = !redoStack.length;
 }
 
+/* ───────── tiled map streaming ─────────
+   Huge maps (Rosebridge is 11776×11264) are served as a pyramid of
+   512 px JPEG tiles. Only tiles covering the current viewport are
+   decoded — pan/zoom stays smooth because the browser never holds
+   the full-resolution bitmap. World pixel coordinates are unchanged,
+   so saved views, pins and exports keep working. */
+const tileCache = new Map();              // 'lvl:tx,ty' -> <img>
+function updateTiles() {
+  const m = state.maps[state.current];
+  if (!m || !m.tiles || !imgNW || !tileLayer) return;
+  const maxL = m.tileLevels - 1;
+  const lvl = Math.max(0, Math.min(maxL, Math.round(-Math.log2(view.z))));
+  const keep = new Set();
+  const add = (lv, cx0, cy0, cx1, cy1) => {
+    const tw = 512 << lv;                 // world px per tile edge
+    const cols = Math.ceil(imgNW / tw), rows = Math.ceil(imgNH / tw);
+    for (let ty = Math.max(0, cy0); ty <= Math.min(rows - 1, cy1); ty++)
+      for (let tx = Math.max(0, cx0); tx <= Math.min(cols - 1, cx1); tx++) {
+        const key = lv + ':' + tx + ',' + ty;
+        keep.add(key);
+        if (tileCache.has(key)) continue;
+        const el = document.createElement('img');
+        el.className = 'tile';
+        el.draggable = false;
+        el.decoding = 'async';
+        el.src = `${m.tiles}/l${lv}/${tx}_${ty}.jpg`;
+        el.style.left = tx * tw + 'px';
+        el.style.top = ty * tw + 'px';
+        el.style.width = tw + 'px';
+        el.style.height = tw + 'px';
+        // stacking: tileLayer is world's first child, so tiles stay below
+        // marker layers; current-level tiles are always appended after the
+        // coarse base tiles, so fine detail lands on top without z-index.
+        tileCache.set(key, el);
+        tileLayer.appendChild(el);
+      }
+  };
+  add(maxL, 0, 0, Infinity, Infinity);    // permanent coarse base (anti-flash, 4 tiles)
+  if (lvl !== maxL) {
+    const tw = 512 << lvl;
+    add(lvl,
+      Math.floor((-view.tx / view.z) / tw),
+      Math.floor((-view.ty / view.z) / tw),
+      Math.floor(((-view.tx + viewport.clientWidth) / view.z) / tw),
+      Math.floor(((-view.ty + viewport.clientHeight) / view.z) / tw));
+  }
+  for (const [key, el] of tileCache)
+    if (!keep.has(key)) { el.remove(); tileCache.delete(key); }
+}
+
 /* ───────── view math ───────── */
 function applyView() {
   world.style.transform = `translate3d(${view.tx}px,${view.ty}px,0) scale(${view.z})`;
-  // marker declutter: at ~25% zoom or less, hide characters & locations (story pings stay)
-  hud.classList.toggle('far-zoom', imgNW > 0 && view.z <= 0.25);
+  updateTiles();
+  // Virtus: markers never fade on zoom-out
+  hud.classList.remove('far-zoom');
   relayoutMarkers();
   const pct = Math.round(view.z * 100);
   $('#stZoom').textContent = `ZOOM ${pct}%`;
@@ -423,8 +404,18 @@ function switchMap(id, opts = {}) {
   pendingPlace = null; viewport && (viewport.style.cursor = '');
   const m = state.maps[id];
   veil.classList.add('on');
+  if (m.tiles) {
+    tileCache.forEach(el => el.remove()); tileCache.clear();
+    tileLayer.innerHTML = '';
+    tileLayer.style.display = '';
+    mapImg.style.display = 'none';
+    if (mapImg.getAttribute('src')) mapImg.removeAttribute('src');   // release the giant decode
+  } else {
+    tileLayer.style.display = 'none';
+    mapImg.style.display = '';
+  }
   const finish = () => {
-    imgNW = mapImg.naturalWidth; imgNH = mapImg.naturalHeight;
+    imgNW = m.tiles ? m.w : mapImg.naturalWidth; imgNH = m.tiles ? m.h : mapImg.naturalHeight;
     world.style.width = imgNW + 'px'; world.style.height = imgNH + 'px';
     const saved = state.views[id];
     if (saved && saved.z) Object.assign(view, saved);
@@ -439,10 +430,11 @@ function switchMap(id, opts = {}) {
       if (fp) { sel = { type: 'ping', id: fp.id }; renderAll(); centerOn(fp.x, fp.y, false); }
     }
     if (!opts.silent) toast(`MAP LOADED — ${m.name.toUpperCase()}`);
-    if (id === 'afterlight-city') { renderDrawer(); $('#mapDrawer').classList.remove('hidden'); }
+    if (m.overview) { renderDrawer(); $('#mapDrawer').classList.remove('hidden'); }
     persist();
   };
-  if (mapImg.getAttribute('src') === m.src && mapImg.complete && mapImg.naturalWidth) finish();
+  if (m.tiles) finish();
+  else if (mapImg.getAttribute('src') === m.src && mapImg.complete && mapImg.naturalWidth) finish();
   else { mapImg.onload = finish; mapImg.onerror = () => { veil.classList.remove('on'); toast('MAP IMAGE FAILED TO LOAD', 'red'); }; mapImg.src = m.src; }
 }
 
@@ -463,10 +455,9 @@ function renderMarkers() {
   markerLayer.innerHTML = '';
   markerLayer.classList.toggle('nolabels', !state.labels);
   const q = $('#searchInput').value.trim().toLowerCase();
-  const noDate = activeKey() === '';   // NO DATE = atlas: locations & pings only
   for (const c of curData().characters) {
     charIndex.set(c.id, c);
-    if (c.hidden || c.unplaced || noDate) continue;
+    if (c.hidden || c.unplaced) continue;
     const el = document.createElement('div');
     el.className = `mk shape-${c.shape || 'circle'}${sel && sel.type === 'char' && sel.id === c.id ? ' sel' : ''}${c.avatar ? ' has-avatar' : ''}${q && !c.name.toLowerCase().includes(q) ? ' dimmed' : ''}`;
     el.dataset.wx = c.x; el.dataset.wy = c.y; placeMarker(el);
@@ -491,35 +482,21 @@ function renderPings() {
     if (p.hidden) continue;
     const el = document.createElement('div');
     const fin = p.status === 'finished';
-    el.className = 'pg' + (fin ? ' fin' : ' ong') + (sel && sel.type === 'ping' && sel.id === p.id ? ' sel' : '');
+    const warn = p.ptype === 'warn';
+    if (warn) {
+      el.className = 'pg warn' + (sel && sel.type === 'ping' && sel.id === p.id ? ' sel' : '');
+      el.style.setProperty('--pgc', p.color || '#ff4438');
+      el.innerHTML = `<div class="pg-ring"></div><div class="warn-sign">\u26A0</div>`;
+    } else {
+      el.className = 'pg' + (fin ? ' fin' : ' ong') + (sel && sel.type === 'ping' && sel.id === p.id ? ' sel' : '');
+      el.style.setProperty('--pgc', fin ? 'var(--pgc-fin)' : 'var(--pgc-ong)');
+      el.innerHTML = `<div class="pg-ring"></div><div class="pg-core"></div>`;
+    }
     el.dataset.wx = p.x; el.dataset.wy = p.y; placeMarker(el);
     el.dataset.id = p.id;
-    el.style.setProperty('--pgc', fin ? 'var(--pgc-fin)' : 'var(--pgc-ong)');
-    el.innerHTML = `<div class="pg-ring"></div><div class="pg-core"></div>`;
     if (p.label) { const l = document.createElement('div'); l.className = 'pg-label'; l.textContent = p.label; el.appendChild(l); }
-    el.addEventListener('pointerdown', e => startEntityDrag(e, p, el, 'ping'));
-    pingLayer.appendChild(el);
-  }
-  // dated ghost pings (NO DATE aggregated view) — read-only, click = jump
-  for (const p of ghostPings()) {
-    if (p.hidden) continue;
-    const el = document.createElement('div');
-    el.className = 'pg ghost';
-    el.dataset.wx = p.x; el.dataset.wy = p.y; placeMarker(el);
-    el.innerHTML = `<div class="pg-ring"></div><div class="pg-core"></div>`;
-    const l = document.createElement('div');
-    l.className = 'pg-label';
-    l.innerHTML = `<span>${esc(p.label || 'PING')}</span><span class="pg-date">${esc(p.ghostDate)}</span>`;
-    el.appendChild(l);
-    el.addEventListener('pointerdown', e => {
-      e.stopPropagation();
-      suppressMapClick = true; setTimeout(() => suppressMapClick = false, 80);
-    });
-    el.addEventListener('click', e => {
-      e.stopPropagation();
-      const pos = evPos(e);
-      openGhostPingPop(p, pos.px, pos.py);
-    });
+    if (!warn || adminOn) el.addEventListener('pointerdown', e => startEntityDrag(e, p, el, 'ping'));
+    else el.addEventListener('pointerdown', e => { e.stopPropagation(); toast('ADMIN MODE NEEDED TO EDIT WARNINGS — TAP 🔒', 'amber'); });
     pingLayer.appendChild(el);
   }
   layoutLabels();
@@ -618,7 +595,6 @@ function layoutLabels() {
         el, w, h, dirs,
         sx: (+el.dataset.wx) * view.z + view.tx,
         sy: (+el.dataset.wy) * view.z + view.ty,
-        ghost: el.classList.contains('ghost'),
         sel: el.classList.contains('sel'),
       });
     }
@@ -630,8 +606,8 @@ function layoutLabels() {
     it.dirs(it).map(([cls, r]) => [cls, { x: r.x - PAD, y: r.y - PAD, w: it.w + PAD * 2, h: it.h + PAD * 2 }]);
   const clash = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
-  // priority: selected first, real markers before date-ghosts, then top-to-bottom
-  items.sort((a, b) => (b.sel - a.sel) || (a.ghost - b.ghost) || (a.sy - b.sy) || (a.sx - b.sx));
+  // priority: selected first, then top-to-bottom (stable de-clash order)
+  items.sort((a, b) => (b.sel - a.sel) || (a.sy - b.sy) || (a.sx - b.sx));
   const placed = [];
   for (const it of items) {
     let done = false;
@@ -653,54 +629,37 @@ function layoutLabels() {
 }
 
 /* ───────── sidebar ───────── */
-/* ───────── global story-ping index (all maps × all dates) ───────── */
+/* ───────── global story-ping index (all maps) ───────── */
 function collectAllPings() {
-  const out = [], seen = new Set();
-  const push = (mapId, key, p, ord) => {
-    const k = mapId + '|' + p.id;
-    if (seen.has(k)) return;
-    seen.add(k);
-    out.push({ p, mapId, key, ord });
-  };
-  // the active date's pings live in the working data; buckets hold the rest
+  const out = [];
   for (const [mid, d] of Object.entries(state.data || {}))
-    (d.pings || []).forEach((p, i) => push(mid, activeKey(), p, i));
-  for (const k of Object.keys(state.timeline || {})) {
-    if (k === activeKey()) continue;
-    for (const [mid, arr] of Object.entries(state.timeline[k]?.pingsByMap || {}))
-      (arr || []).forEach((p, i) => push(mid, k, p, i));
-  }
+    (d.pings || []).forEach((p, i) => out.push({ p, mapId: mid, ord: i }));
   out.sort((a, b) => ((b.p.createdAt || 0) - (a.p.createdAt || 0)) || (b.ord - a.ord));
   return out;
 }
-/* jump to any story ping anywhere — swaps date and/or map, then focuses it */
-function gotoPing(mapId, key, id) {
+/* jump to any story ping anywhere — swaps map, then focuses it */
+function gotoPing(mapId, id) {
   closePop();
-  const needMap = mapId !== state.current, needDate = key !== activeKey();
-  if (needDate) switchDate(key);
-  if (needMap) { toast(`JUMPING TO PING — ${mapNameOf(mapId).toUpperCase()}${key ? ' · ' + key : ' · NO DATE'}`); switchMap(mapId, { silent: true, focus: id }); return; }
-  const p = curData().pings.find(x => x.id === id);
-  if (p) { sel = { type: 'ping', id }; renderAll(); centerOn(p.x, p.y); }
+  if (mapId === state.current) {
+    const p = curData().pings.find(x => x.id === id);
+    if (p) { sel = { type: 'ping', id }; renderAll(); centerOn(p.x, p.y); }
+    return;
+  }
+  toast(`JUMPING TO PING — ${mapNameOf(mapId).toUpperCase()}`);
+  switchMap(mapId, { silent: true, focus: id });
 }
-/* flip a ping's visible flag in whichever map/date bucket owns it */
-function togglePingHidden(mapId, key, id) {
-  let tp;
-  if (key === activeKey()) tp = state.data[mapId]?.pings?.find(x => x.id === id);
-  else tp = state.timeline?.[key]?.pingsByMap?.[mapId]?.find(x => x.id === id);
+/* flip a ping's visible flag on whichever map owns it */
+function togglePingHidden(mapId, id) {
+  const tp = state.data[mapId]?.pings?.find(x => x.id === id);
   if (tp) tp.hidden = !tp.hidden;
   persist(); renderPings(); renderSidebar();
 }
 
-/* delete a ping from whichever map/date bucket owns it */
-function deleteGlobalPing(mapId, key, id) {
-  if (key === activeKey() && mapId === state.current) { deletePing(id); return; }
-  if (key === activeKey()) {
-    const dd = state.data[mapId];
-    if (dd) dd.pings = (dd.pings || []).filter(p => p.id !== id);
-  } else {
-    const arr = state.timeline?.[key]?.pingsByMap?.[mapId];
-    if (arr) state.timeline[key].pingsByMap[mapId] = arr.filter(p => p.id !== id);
-  }
+/* delete a ping from whichever map owns it */
+function deleteGlobalPing(mapId, id) {
+  if (mapId === state.current) { deletePing(id); return; }
+  const dd = state.data[mapId];
+  if (dd) dd.pings = (dd.pings || []).filter(p => p.id !== id);
   persist(); renderSidebar(); toast('PING REMOVED', 'red');
 }
 
@@ -717,14 +676,12 @@ function renderSidebar() {
   const list = $('#charList');
   list.innerHTML = '';
   const chars = d.characters.filter(c => !q || c.name.toLowerCase().includes(q));
-  const noDate = activeKey() === '';
   if (!chars.length) {
     list.innerHTML = `<div class="empty-msg">${q ? 'NO MATCHES FOUND'
-      : noDate ? 'CHARACTERS LIVE ON DATES —<br>PICK A DATE IN ◷ CAL TO PLACE THEM'
-               : 'NO CHARACTERS ON THIS MAP —<br>CLICK THE MAP TO PLACE ONE'}</div>`;
+      : 'NO CHARACTERS ON THIS MAP —<br>CLICK THE MAP TO PLACE ONE'}</div>`;
   }
   for (const c of chars) {
-    const unplaced = c.unplaced || noDate;
+    const unplaced = !!c.unplaced;
     const row = document.createElement('div');
     row.className = 'char-row' + (sel && sel.type === 'char' && sel.id === c.id ? ' on' : '') + (c.hidden ? ' is-hidden' : '') + (unplaced ? ' is-unplaced' : '');
     row.innerHTML = `
@@ -732,9 +689,9 @@ function renderSidebar() {
       <span class="char-name">${esc(c.name)}</span>
       <span class="row-btns">
         ${unplaced
-          ? `<button class="rb place" data-act="place" title="${noDate ? 'Pick a date to place this character' : `Place on this date (${esc(activeKey())})`}">◎</button>`
+          ? `<button class="rb place" data-act="place" title="Place on the map">◎</button>`
           : `<button class="rb" data-act="locate" title="Centre on character">⌖</button>`}
-        ${noDate ? '' : `<button class="rb" data-act="dup" title="Duplicate marker">⧉</button>`}
+        <button class="rb" data-act="dup" title="Duplicate marker">⧉</button>
         <button class="rb" data-act="hide" title="Hide / show on map">👁</button>
         <button class="rb warn" data-act="del" title="Remove character">✕</button>
       </span>`;
@@ -743,7 +700,6 @@ function renderSidebar() {
       if (act === 'hide')  { pushHistory(); c.hidden = !c.hidden; persist(); renderMarkers(); renderSidebar(); return; }
       if (act === 'del')   { deleteChar(c.id); return; }
       if (act === 'dup')   { duplicateChar(c.id); return; }
-      if (noDate) { guidePickDate(c); return; }
       if (act === 'place') { beginPlacement(c.id); return; }
       if (c.unplaced) { beginPlacement(c.id); return; }
       selectChar(c.id);
@@ -772,23 +728,24 @@ function renderSidebar() {
   }
   const plist = $('#pingList');
   plist.innerHTML = '';
-  // ALL story pings — every map, every date, newest first; involved characters as chips
-  const allPings = collectAllPings();
+  // ALL story pings — every map, newest first; involved characters as chips
+  // (warning pings are activity markers, never part of the story list)
+  const allPings = collectAllPings().filter(it => it.p.ptype !== 'warn');
   if (!allPings.length) plist.innerHTML = `<div class="empty-msg">NO PINGS ANYWHERE — ENABLE ⚑ PING MODE AND CLICK</div>`;
   for (const it of allPings) {
     const p = it.p;
-    const off = it.mapId !== state.current || it.key !== activeKey();
+    const off = it.mapId !== state.current;
     const on = sel && sel.type === 'ping' && sel.id === p.id && !off;
-    const meta = off ? `<span class="ping-meta">◷ ${esc(it.key || 'NO DATE')} · ${esc(mapNameOf(it.mapId).toUpperCase())}</span>` : '';
+    const meta = off ? `<span class="ping-meta">${esc(mapNameOf(it.mapId).toUpperCase())}</span>` : '';
     const row = document.createElement('div');
     row.className = 'ping-row' + (on ? ' on' : '') + (p.hidden ? ' is-hidden' : '');
-    row.innerHTML = `<span class="ping-dot ${p.status === 'finished' ? 'fin' : 'ong'}"></span><span class="ping-name">${esc(p.label || 'PING')}${pingStatusBadge(p)}<span class="ping-chars">${pingChars(p, state.data[it.mapId]?.characters || [])}</span>${meta}</span>
+    row.innerHTML = `<span class="${p.ptype === 'warn' ? 'ping-warn-glyph' : `ping-dot ${p.status === 'finished' ? 'fin' : 'ong'}`}">${p.ptype === 'warn' ? '\u26A0' : ''}</span><span class="ping-name">${esc(p.label || (p.ptype === 'warn' ? 'WARNING' : 'PING'))}${p.ptype === 'warn' ? '' : pingStatusBadge(p)}<span class="ping-chars">${pingChars(p, state.data[it.mapId]?.characters || [])}</span>${meta}</span>
       <span class="row-btns"><button class="rb" data-act="hide" title="Hide / show on map">👁</button><button class="rb warn" title="Remove ping">✕</button></span>`;
     row.addEventListener('click', e => {
       const rb = e.target.closest('.rb');
-      if (rb && rb.dataset.act === 'hide') { togglePingHidden(it.mapId, it.key, p.id); return; }
-      if (rb) { deleteGlobalPing(it.mapId, it.key, p.id); return; }
-      gotoPing(it.mapId, it.key, p.id);
+      if (rb && rb.dataset.act === 'hide') { togglePingHidden(it.mapId, p.id); return; }
+      if (rb) { deleteGlobalPing(it.mapId, p.id); return; }
+      gotoPing(it.mapId, p.id);
     });
     plist.appendChild(row);
   }
@@ -799,20 +756,16 @@ function updateStatus() {
   const d = curData();
   $('#charCount').textContent = d.characters.length;
   $('#locCount').textContent = d.locations.length;
-  $('#pingCount').textContent = collectAllPings().length;
+  $('#pingCount').textContent = collectAllPings().filter(it => it.p.ptype !== 'warn').length;
   $('#stChars').textContent = `${d.characters.length} CHARACTER${d.characters.length === 1 ? '' : 'S'}`;
   $('#stLocs').textContent = `${d.locations.length} LOCATION${d.locations.length === 1 ? '' : 'S'}`;
   $('#stPings').textContent = `${d.pings.length} PING${d.pings.length === 1 ? '' : 'S'}`;
-  updateCalTag();
-  // keep ping-highlight dots fresh while the drawer is open
-  const cd = $('#calDrawer');
-  if (cd && !cd.classList.contains('hidden')) renderCalendar();
 }
 
-function renderAll() { renderMarkers(); renderLocations(); renderPings(); renderSidebar(); renderDrawer(); }
+function renderAll() { renderMarkers(); renderLocations(); renderPings(); renderShades(); renderSidebar(); renderDrawer(); }
 
 /* ───────── selection ───────── */
-function deselect() { sel = null; closePop(); renderMarkers(); renderLocations(); renderPings(); renderSidebar(); }
+function deselect() { sel = null; closePop(); renderMarkers(); renderLocations(); renderPings(); renderShades(); renderSidebar(); }
 function selectChar(id) { sel = { type: 'char', id }; renderMarkers(); renderSidebar(); }
 function selectPing(id) { sel = { type: 'ping', id }; renderPings(); renderSidebar(); }
 
@@ -1005,6 +958,35 @@ const pingStatusBadge = p => {
   const fin = p.status === 'finished';
   return `<span class="ping-status ${fin ? 'finished' : 'ongoing'}">${fin ? 'FINISHED' : 'ONGOING'}</span>`;
 };
+/* TYPE: STORY (⚑) ⇄ WARNING (⚠) — conversion either way */
+function popPingKind(el, p) {
+  const wrap = document.createElement('div');
+  wrap.className = 'pop-inv pop-st';
+  wrap.innerHTML = `<div class="pop-inv-title">TYPE</div>`;
+  const seg = document.createElement('div');
+  seg.className = 'pop-st-seg';
+  const mk = (key, label) => {
+    const b = document.createElement('button');
+    const isWarn = key === 'warn';
+    b.className = 'pop-st-btn pingkind' + (isWarn ? ' warn' : '') + ((p.ptype === 'warn') === isWarn ? ' on' : '');
+    b.innerHTML = label;
+    b.dataset.k = key;
+    b.addEventListener('click', () => {
+      const live = curData().pings.find(x => x.id === p.id) || p;
+      if ((live.ptype === 'warn') === isWarn) return;
+      pushHistory();
+      if (isWarn) live.ptype = 'warn'; else delete live.ptype;
+      p.ptype = live.ptype;
+      persist(); renderPings(); renderSidebar();
+      closePop(); openPingPop(live, view.tx + live.x * view.z, view.ty + live.y * view.z);
+    });
+    return b;
+  };
+  seg.append(mk('story', '⚑ STORY'), mk('warn', '⚠ WARNING'));
+  wrap.appendChild(seg);
+  el.appendChild(wrap);
+}
+
 function popPingStatus(el, p) {
   p.status ||= 'ongoing';
   const wrap = document.createElement('div');
@@ -1071,9 +1053,105 @@ function setPingLabel(id, v) {
   if (!p || (p.label || '') === v) return;
   pushHistory(); p.label = v; persist(); renderPings(); renderSidebar();
 }
+/* ───────── red-zone (shade) popup ───────── */
+function openShadePop(sh, px, py) {
+  openPop(el => {
+    popHeader(el, 'RED ZONE');
+    const live = () => (curData().shades || []).find(x => x.id === sh.id) || sh;
+    const note0 = document.createElement('div');
+    note0.className = 'pop-inv-none';
+    note0.style.marginBottom = '6px';
+    note0.textContent = 'ACTIVITY SHADING — LOW-OCCUPANCY SCALE';
+    el.appendChild(note0);
+
+    // intensity: light red → strong red
+    const wrap = document.createElement('div');
+    wrap.className = 'pop-inv pop-st';
+    wrap.innerHTML = `<div class="pop-inv-title">INTENSITY (LOW OCCUPANCY)</div>`;
+    const seg = document.createElement('div');
+    seg.className = 'pop-st-seg';
+    const mkI = (lvl, label) => {
+      const b = document.createElement('button');
+      b.className = 'pop-st-btn shade-lv' + (lvI(sh) === lvl ? ' on' : '');
+      b.dataset.k = lvl;
+      b.innerHTML = label;
+      b.addEventListener('click', () => {
+        pushHistory();
+        live().level = lvl; sh.level = lvl;
+        persist(); renderShades();
+        seg.querySelectorAll('.pop-st-btn').forEach(x => x.classList.toggle('on', +x.dataset.k === lvl));
+      });
+      return b;
+    };
+    function lvI(x) { return x.level || 2; }
+    seg.append(mkI(1, 'LOW'), mkI(2, 'MED'), mkI(3, 'HIGH'));
+    wrap.appendChild(seg);
+    el.appendChild(wrap);
+
+    // zone color (default red)
+    const cw = document.createElement('div');
+    cw.className = 'pop-inv pop-st';
+    cw.innerHTML = `<div class="pop-inv-title">COLOR</div>`;
+    el.appendChild(cw);
+    swatchRow(cw, sh.color || '#ff2f2f', c => {
+      pushHistory();
+      live().color = c; sh.color = c;
+      persist(); renderShades();
+    });
+
+    // size segment S / M / L (world-px radii so zones scale with the map)
+    const wrap2 = document.createElement('div');
+    wrap2.className = 'pop-inv pop-st';
+    wrap2.innerHTML = `<div class="pop-inv-title">SIZE</div>`;
+    const seg2 = document.createElement('div');
+    seg2.className = 'pop-st-seg';
+    const curKey = () => {
+      const r = sh.r || SHADE_RADII.m;
+      if (r <= SHADE_RADII.s) return 's';
+      if (r >= SHADE_RADII.l) return 'l';
+      return 'm';
+    };
+    const mkR = (key, label) => {
+      const b = document.createElement('button');
+      b.className = 'pop-st-btn' + (curKey() === key ? ' on' : '');
+      b.dataset.k = key;
+      b.textContent = label;
+      b.addEventListener('click', () => {
+        pushHistory();
+        live().r = SHADE_RADII[key]; sh.r = SHADE_RADII[key];
+        persist(); renderShades();
+        seg2.querySelectorAll('.pop-st-btn').forEach(x => x.classList.toggle('on', x.dataset.k === key));
+      });
+      return b;
+    };
+    seg2.append(mkR('s', 'S'), mkR('m', 'M'), mkR('l', 'L'));
+    wrap2.appendChild(seg2);
+    el.appendChild(wrap2);
+
+    // optional note
+    const inp = document.createElement('input');
+    inp.className = 'pop-input'; inp.value = sh.note || '';
+    inp.placeholder = 'NOTE (e.g. HOWLER ACTIVITY)…'; inp.maxLength = 60; inp.spellcheck = false;
+    inp.addEventListener('input', debounce(() => { pushHistory(); live().note = inp.value.trim(); persist(); }, 400));
+    inp.addEventListener('keydown', e => e.stopPropagation());
+    el.appendChild(inp);
+
+    const act = document.createElement('div');
+    act.className = 'pop-actions';
+    act.innerHTML = `<button class="pbtn" data-a="centre">⌖ CENTRE</button><button class="pbtn" data-a="vis">${sh.hidden ? '◎ SHOW' : '◎ HIDE'}</button><button class="pbtn danger" data-a="del">✕ CLEAR ZONE</button>`;
+    act.addEventListener('click', e => {
+      const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
+      if (a === 'centre') centerOn(live().x, live().y);
+      if (a === 'vis') toggleShadeHidden(live().id);
+      if (a === 'del') deleteShade(live().id);
+    });
+    el.appendChild(act);
+  }, px, py);
+}
+
 function openPingPop(p, px, py) {
   openPop(el => {
-    popHeader(el, 'PING');
+    popHeader(el, p.ptype === 'warn' ? '⚠ WARNING' : 'PING');
     const live = () => curData().pings.find(x => x.id === p.id) || p;
     const inp = document.createElement('input');
     inp.className = 'pop-input'; inp.value = p.label || ''; inp.placeholder = 'LABEL (e.g. MEETING POINT)…';
@@ -1082,8 +1160,22 @@ function openPingPop(p, px, py) {
     inp.addEventListener('input', debounce(commitLabel, 350));
     inp.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') commitLabel(); });
     el.appendChild(inp);
-    // ongoing / finished status toggle
-    popPingStatus(el, p);
+    // TYPE toggle — story ping vs warning ping (activity marker; admins only)
+    if (adminOn) popPingKind(el, p);
+    // ongoing / finished status toggle (story pings only)
+    if (p.ptype !== 'warn') popPingStatus(el, p);
+    // warn color (admins only)
+    if (p.ptype === 'warn' && adminOn) {
+      const cw = document.createElement('div');
+      cw.className = 'pop-inv pop-st';
+      cw.innerHTML = `<div class="pop-inv-title">COLOR</div>`;
+      el.appendChild(cw);
+      swatchRow(cw, p.color || '#ff4438', c => {
+        pushHistory();
+        live().color = c; p.color = c;
+        persist(); renderPings(); renderSidebar();
+      });
+    }
     // characters involved in this story ping — toggle roster chips
     popInvolvedChars(el, p);
     const act = document.createElement('div');
@@ -1151,9 +1243,10 @@ function duplicateChar(id) {
   persist(); closePop(); renderAll();
   toast('CHARACTER DUPLICATED');
 }
-function addPing(x, y) {
+function addPing(x, y, kind) {
   pushHistory();
   const p = { id: uid(), x, y, label: '', createdAt: Date.now(), chars: [], status: 'ongoing' };
+  if (kind === 'warn') { p.ptype = 'warn'; p.color = '#ff4438'; }
   curData().pings.push(p);
   sel = { type: 'ping', id: p.id };
   persist(); renderPings(); renderSidebar();
@@ -1167,6 +1260,126 @@ function deletePing(id) {
   if (sel?.type === 'ping' && sel.id === id) sel = null;
   persist(); closePop(); renderPings(); renderSidebar();
   toast('PING REMOVED', 'amber');
+}
+
+/* ───────── ADMIN MODE — red zones & warning pings are admin-only ─────────
+   Locked by default; unlock with the access code. Flag persists per-browser. */
+const ADMIN_CODE = 'virtus25';
+const ADMIN_KEY = LS_KEY + ':admin';
+let adminOn = false;
+function isAdmin() { return adminOn; }
+function setAdmin(on, quiet) {
+  adminOn = !!on;
+  try { localStorage.setItem(ADMIN_KEY, adminOn ? '1' : '0'); } catch (e) { }
+  applyAdminUI();
+  if (!quiet) toast(adminOn ? 'ADMIN MODE ON — SHADES & WARNINGS EDITABLE' : 'ADMIN MODE LOCKED', adminOn ? 'green' : 'amber');
+}
+function applyAdminUI() {
+  const b = $('#btnAdmin');
+  if (b) {
+    b.classList.toggle('on', adminOn);
+    const ico = b.querySelector('.ico'); if (ico) ico.textContent = adminOn ? '🔓' : '🔒';
+  }
+  try { (document.querySelectorAll('#modeGroup [data-admin]') || []).forEach(x => x.classList.toggle('hidden', !adminOn)); } catch (e) { }
+  if (!adminOn) {
+    closePop();
+    if (mode === 'warn' || mode === 'shade') setMode('select');
+  }
+  if (state) { renderPings(); renderShades(); }
+}
+function unlockAdmin(code) {
+  if (String(code || '').trim() === ADMIN_CODE) { setAdmin(true); return true; }
+  toast('WRONG ACCESS CODE', 'red');
+  return false;
+}
+function openAdminPop() {
+  if (adminOn) { setAdmin(false); return; }
+  openPop(el => {
+    popHeader(el, '🔒 ADMIN MODE');
+    const msg = document.createElement('div');
+    msg.className = 'pop-inv-none';
+    msg.style.marginBottom = '6px';
+    msg.textContent = 'ACCESS CODE REQUIRED TO CONTROL RED ZONES & WARNINGS';
+    el.appendChild(msg);
+    const inp = document.createElement('input');
+    inp.type = 'password'; inp.className = 'pop-input'; inp.placeholder = 'ACCESS CODE…';
+    inp.maxLength = 40; inp.spellcheck = false;
+    el.appendChild(inp);
+    const act = document.createElement('div');
+    act.className = 'pop-actions';
+    act.innerHTML = `<button class="pbtn primary" data-a="go">UNLOCK</button>`;
+    const go = () => { if (unlockAdmin(inp.value)) closePop(); else { inp.value = ''; inp.focus(); } };
+    act.querySelector('button').addEventListener('click', go);
+    inp.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') go(); });
+    el.appendChild(act);
+    setTimeout(() => inp.focus(), 30);
+  }, 80, 72);
+}
+
+/* hex '#rrggbb' → {r,g,b} for building translucent fills */
+function hexRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return { r: 255, g: 47, b: 47 };
+  const v = parseInt(m[1], 16);
+  return { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255 };
+}
+
+/* ───────── RED ZONES (activity shading) ─────────
+   Shades live inside #world so they scale/pan with the map — they mark
+   geography. Intensity ramps from light to strong red on an occupancy scale. */
+const SHADE_LEVELS = {
+  1: { label: 'LOW',  a1: 0.13, a2: 0.05 },
+  2: { label: 'MED',  a1: 0.26, a2: 0.10 },
+  3: { label: 'HIGH', a1: 0.45, a2: 0.18 },
+};
+const SHADE_RADII = { s: 90, m: 190, l: 360 };
+
+function addShade(x, y) {
+  pushHistory();
+  const sh = { id: uid(), x, y, r: SHADE_RADII.m, level: 2, note: '', color: '#ff2f2f' };
+  curData().shades.push(sh);
+  sel = { type: 'shade', id: sh.id };
+  persist(); renderShades(); renderSidebar();
+  toast('ZONE SHADED', 'red');
+  return sh;
+}
+
+function deleteShade(id) {
+  pushHistory();
+  const d = curData();
+  d.shades = (d.shades || []).filter(x => x.id !== id);
+  if (sel?.type === 'shade' && sel.id === id) sel = null;
+  persist(); closePop(); renderShades(); renderSidebar();
+  toast('ZONE CLEARED', 'red');
+}
+
+function toggleShadeHidden(id) {
+  pushHistory();
+  const sh = (curData().shades || []).find(x => x.id === id);
+  if (!sh) return;
+  sh.hidden = !sh.hidden;
+  persist(); renderShades(); renderSidebar(); closePop();
+}
+
+function renderShades() {
+  shadeLayer.innerHTML = '';
+  const d = curData();
+  for (const sh of (d.shades || [])) {
+    if (sh.hidden) continue;
+    const lv = SHADE_LEVELS[sh.level] || SHADE_LEVELS[2];
+    const r = sh.r || SHADE_RADII.m;
+    const el = document.createElement('div');
+    el.className = 'shade' + (sel && sel.type === 'shade' && sel.id === sh.id ? ' sel' : '');
+    el.style.left = sh.x + 'px'; el.style.top = sh.y + 'px';
+    el.style.width = el.style.height = (2 * r) + 'px';
+    const c = hexRgb(sh.color);
+    el.style.background = `radial-gradient(circle, rgba(${c.r},${c.g},${c.b},${lv.a1}) 0%, rgba(${c.r},${c.g},${c.b},${lv.a2}) 55%, rgba(${c.r},${c.g},${c.b},0) 72%)`;
+    el.style.borderColor = `rgba(${c.r},${c.g},${c.b},${lv.a1 * 2})`;
+    el.dataset.id = sh.id;
+    if (adminOn) el.addEventListener('pointerdown', e => startEntityDrag(e, sh, el, 'shade'));
+    else el.addEventListener('pointerdown', e => { e.stopPropagation(); toast('ADMIN MODE NEEDED TO EDIT ZONES — TAP 🔒', 'amber'); });
+    shadeLayer.appendChild(el);
+  }
 }
 
 /* ───────── dragging markers / pings ───────── */
@@ -1186,7 +1399,8 @@ function startEntityDrag(e, ent, el, kind) {
     start.moved = true;
     closePop();
     ent.x = start.x + dx; ent.y = start.y + dy;
-    el.dataset.wx = ent.x; el.dataset.wy = ent.y; placeMarker(el);
+    if (kind === 'shade') { el.style.left = ent.x + 'px'; el.style.top = ent.y + 'px'; }
+    else { el.dataset.wx = ent.x; el.dataset.wy = ent.y; placeMarker(el); }
     window.liveDragTick?.();
   };
   const onUp = ev => {
@@ -1203,7 +1417,8 @@ function startEntityDrag(e, ent, el, kind) {
     } else {
       const p = evPos(ev);
       if (kind === 'char') { sel = { type: 'char', id: ent.id }; renderMarkers(); renderSidebar(); openEditPop(ent, p.px, p.py); }
-      else { sel = { type: 'ping', id: ent.id }; renderPings(); renderSidebar(); openPingPop(ent, p.px, p.py); }
+      else if (kind === 'ping') { sel = { type: 'ping', id: ent.id }; renderPings(); renderSidebar(); openPingPop(ent, p.px, p.py); }
+      else if (kind === 'shade') { sel = { type: 'shade', id: ent.id }; renderShades(); openShadePop(ent, p.px, p.py); }
     }
     dragSnap = null;
   };
@@ -1213,27 +1428,45 @@ function startEntityDrag(e, ent, el, kind) {
 
 /* ───────── map drawer ───────── */
 function mapPingCount(id) {
-  // visible story pings only (Locations, characters & hidden pings never count)
-  if (activeKey() !== '') return (state.data[id]?.pings || []).filter(p => !p.hidden).length;
-  // NO DATE: dateless pings + every dated ghost ping, deduped by id
-  const seen = new Set();
-  for (const p of (state.data[id]?.pings || [])) if (p && p.id != null && !p.hidden) seen.add(p.id);
-  for (const key of Object.keys(state.timeline || {})) {
-    if (key === '') continue;
-    for (const p of (state.timeline[key]?.pingsByMap?.[id] || [])) if (p && p.id != null && !p.hidden) seen.add(p.id);
-  }
-  return seen.size;
+  // visible story pings only (Locations, characters, hidden & warning pings never count)
+  return (state.data[id]?.pings || []).filter(p => !p.hidden && p.ptype !== 'warn').length;
 }
 function renderDrawer() {
   const grid = $('#mapGrid');
   grid.innerHTML = '';
-  $('#drawerTitle').textContent = state.current === 'afterlight-city' ? 'MAIN MENU — SELECT DESTINATION' : 'SELECT MAP';
+  const onOverview = !!state.maps[state.current]?.overview;
+  $('#drawerTitle').textContent = onOverview ? 'ROSEBRIDGE — SELECT SECTOR' : 'SELECT MAP';
+  // sector menu: moderate-quality overview image split into a 3x3 grid;
+  // clicking a section opens that sector's high-definition map
+  const ov = Object.values(state.maps).find(m => m.overview && m.menu);
+  if (ov) {
+    const menu = document.createElement('div');
+    menu.className = 'sector-menu';
+    const img = document.createElement('img');
+    img.src = ov.menu; img.alt = 'Rosebridge overview'; img.className = 'sm-img';
+    img.draggable = false;
+    menu.appendChild(img);
+    for (const m of Object.values(state.maps)) {
+      if (!m.sector) continue;
+      const row = 'abc'.indexOf(m.sector[0]), col = +m.sector[1] - 1;
+      const cell = document.createElement('button');
+      cell.className = 'sm-cell' + (state.current === m.id ? ' on' : '');
+      cell.style.left = (col * 100 / 3) + '%';
+      cell.style.top = (row * 100 / 3) + '%';
+      const n = mapPingCount(m.id);
+      cell.innerHTML = `<span class="sm-name">${m.sector.toUpperCase()}</span>${n ? `<span class="sm-count">${n} ⚑</span>` : ''}`;
+      cell.title = `${m.name.toUpperCase()} — HIGH DEFINITION`;
+      cell.addEventListener('click', () => { $('#mapDrawer').classList.add('hidden'); switchMap(m.id); });
+      menu.appendChild(cell);
+    }
+    grid.appendChild(menu);
+  }
   for (const id of state.order) {
     const m = state.maps[id];
     const n = mapPingCount(id);
     const card = document.createElement('button');
     card.className = 'map-card' + (id === state.current ? ' on' : '');
-    card.innerHTML = `<img src="${m.src}" alt="" loading="lazy"><span class="mc-name">${esc(m.name)}</span>${n ? `<span class="mc-count">${n} ⚑</span>` : ''}`;
+    card.innerHTML = `<img src="${m.thumb || m.src}" alt="" loading="lazy"><span class="mc-name">${esc(m.name)}</span>${n ? `<span class="mc-count">${n} ⚑</span>` : ''}`;
     card.addEventListener('click', () => { $('#mapDrawer').classList.add('hidden'); switchMap(id); });
     grid.appendChild(card);
   }
@@ -1367,11 +1600,11 @@ async function handleKmz(file) {
 
 /* ───────── export / import ───────── */
 function exportSetup() {
-  const payload = JSON.stringify({ app: 'afterlight-character-tracker', v: 1, exported: new Date().toISOString(), state }, null, 2);
+  const payload = JSON.stringify({ app: 'virtus-character-tracker', v: 1, exported: new Date().toISOString(), state }, null, 2);
   const a = document.createElement('a');
   const d = new Date(), p = n => String(n).padStart(2, '0');
   a.href = URL.createObjectURL(new Blob([payload], { type: 'application/json' }));
-  a.download = `afterlight-setup-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.json`;
+  a.download = `virtus-setup-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
   toast('SETUP EXPORTED');
@@ -1387,8 +1620,7 @@ function importSetup(file) {
       state = Object.assign(freshState(), s);
       ensureBuiltins();
       runMapMigrations();
-      ensureTimeline();
-      updateCalTag();
+      migrateRosebridgeSectors();
       sel = null; closePop();
       applyTheme(); applyLabels();
       switchMap(state.current, { silent: true, skipViewSave: true });
@@ -1402,6 +1634,15 @@ function importSetup(file) {
 /* ───────── screenshot capture ───────── */
 function captureView() {
   if (!imgNW) return;
+  const capMap = state.maps[state.current];
+  if (capMap?.tiles && (!mapImg.complete || !mapImg.naturalWidth)) {
+    // full-res master is only loaded on demand for exports
+    veil.classList.add('on');
+    mapImg.onload = () => { veil.classList.remove('on'); captureView(); };
+    mapImg.onerror = () => { veil.classList.remove('on'); toast('MAP IMAGE FAILED TO LOAD', 'red'); };
+    mapImg.src = capMap.src;
+    return;
+  }
   try {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const vw = viewport.clientWidth, vh = viewport.clientHeight;
@@ -1412,6 +1653,7 @@ function captureView() {
     x.fillStyle = getComputedStyle(document.body).getPropertyValue('--bg') || '#0a0e10';
     x.fillRect(0, 0, vw, vh);
     x.drawImage(mapImg, view.tx, view.ty, imgNW * view.z, imgNH * view.z);
+    if (capMap?.tiles) mapImg.removeAttribute('src');   // release the giant decode after capture
 
     // locations (fixed place pins)
     for (const l of curData().locations) {
@@ -1453,7 +1695,7 @@ function captureView() {
       if (state.labels) drawLabel(x, c.name, sx + (c.avatar ? 18 : 12), sy, c.color, '#eafff7');
     }
     const a = document.createElement('a');
-    a.download = `afterlight-map-${state.current}.png`;
+    a.download = `virtus-map-${state.current}.png`;
     a.href = cv.toDataURL('image/png');
     a.click();
     toast('VIEW CAPTURED');
@@ -1528,13 +1770,14 @@ function applyLabels() {
   pingLayer.classList.toggle('nolabels', !on);
 }
 function setMode(m) {
+  if ((m === 'warn' || m === 'shade') && !adminOn) { toast('ADMIN MODE — TAP 🔒 TO UNLOCK', 'amber'); return; }
   mode = m;
   $$('#modeGroup .mode').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
   viewport.classList.toggle('mode-select', m === 'select');
   closePop();
-  const msgs = { select: 'SELECT MODE — CLICK MARKERS, DRAG TO PAN', add: 'ADD MODE — CLICK MAP TO POSITION A CHARACTER', loc: 'LOCATION MODE — CLICK MAP TO MARK A FIXED PLACE', ping: 'PING MODE — CLICK MAP TO DROP A PING' };
-  if (m !== 'select' && state.current === 'afterlight-city')
-    toast('PLACEMENT DISABLED ON OVERVIEW — SELECT A DESTINATION', 'amber');
+  const msgs = { select: 'SELECT MODE — CLICK MARKERS, DRAG TO PAN', add: 'ADD MODE — CLICK MAP TO POSITION A CHARACTER', loc: 'LOCATION MODE — CLICK MAP TO MARK A FIXED PLACE', ping: 'PING MODE — CLICK MAP TO DROP A PING', warn: 'WARN MODE — CLICK MAP TO DROP A ⚠ WARNING PING', shade: 'SHADE MODE — CLICK MAP TO SHADE A RED ZONE' };
+  if (m !== 'select' && state.maps[state.current]?.overview)
+    toast('PLACEMENT DISABLED ON OVERVIEW — SELECT A SECTOR', 'amber');
   else toast(msgs[m], m === 'ping' ? 'amber' : '');
 }
 
@@ -1575,23 +1818,22 @@ function wireViewport() {
     const { px, py } = evPos(e);
     const m = toMap(px, py);
     if (m.x < 0 || m.y < 0 || m.x > imgNW || m.y > imgNH) { deselect(); return; }
-    // timeline placement mode takes precedence
+    // pending roster placement takes precedence
     if (pendingPlace) {
-      if (state.current === 'afterlight-city') {
-        toast('OVERVIEW IS VIEW-ONLY — PLACE ON A DISTRICT MAP', 'amber');
+      if (state.maps[state.current]?.overview) {
+        toast('OVERVIEW IS VIEW-ONLY — PLACE ON A SECTOR MAP', 'amber');
         return;
       }
       placePendingAt(m.x, m.y);
       return;
     }
     // overview is view-only — no placement of any kind
-    if (state.current === 'afterlight-city' && mode !== 'select') {
-      toast('OVERVIEW IS VIEW-ONLY — SELECT A DESTINATION', 'amber');
+    if (state.maps[state.current]?.overview && mode !== 'select') {
+      toast('OVERVIEW IS VIEW-ONLY — SELECT A SECTOR', 'amber');
       renderDrawer(); $('#mapDrawer').classList.remove('hidden');
       return;
     }
     if (mode === 'add') {
-      if (activeKey() === '') { guidePickDate(null); return; }
       deselect();
       openAddPop(m.x, m.y, px, py);
     } else if (mode === 'loc') {
@@ -1601,6 +1843,14 @@ function wireViewport() {
       deselect();
       const p = addPing(m.x, m.y);
       openPingPop(p, px, py);
+    } else if (mode === 'warn') {
+      deselect();
+      const p = addPing(m.x, m.y, 'warn');
+      openPingPop(p, px, py);
+    } else if (mode === 'shade') {
+      deselect();
+      const sh = addShade(m.x, m.y);
+      openShadePop(sh, px, py);
     } else {
       deselect();
     }
@@ -1635,6 +1885,8 @@ function wireKeys() {
       case 'n': case 'N': setMode('add'); break;
       case 'b': case 'B': setMode('loc'); break;
       case 'p': case 'P': setMode('ping'); break;
+      case 'w': case 'W': setMode('warn'); break;
+      case 's': case 'S': setMode('shade'); break;
       case 'f': case 'F': fitView(); break;
       case 'l': case 'L': toggleLabels(); break;
       case '+': case '=': zoomAt(viewport.clientWidth / 2, viewport.clientHeight / 2, 1.25); break;
@@ -1643,6 +1895,7 @@ function wireKeys() {
         if (sel?.type === 'char') deleteChar(sel.id);
         else if (sel?.type === 'loc') deleteLoc(sel.id);
         else if (sel?.type === 'ping') deletePing(sel.id);
+        else if (sel?.type === 'shade') deleteShade(sel.id);
         break;
       case 'Escape':
         if (!$('#modal').classList.contains('hidden')) $('#modal').classList.add('hidden');
@@ -1700,6 +1953,8 @@ function wireToolbar() {
     toast(state.theme === 'light' ? 'LIGHT INTERFACE' : 'DARK INTERFACE');
   });
   $('#btnHelp').addEventListener('click', showHelp);
+  $('#btnAdmin').addEventListener('click', openAdminPop);
+  applyAdminUI();
   $('#btnClear').addEventListener('click', confirmClear);
   $('#btnHideAll').addEventListener('click', () => {
     pushHistory();
@@ -1707,6 +1962,7 @@ function wireToolbar() {
     d.characters.forEach(c => c.hidden = true);
     d.locations.forEach(l => l.hidden = true);
     d.pings.forEach(p => p.hidden = true);
+    (d.shades || []).forEach(x => x.hidden = true);
     persist(); renderAll(); toast('EVERYTHING HIDDEN');
   });
   $('#btnShowAll').addEventListener('click', () => {
@@ -1715,6 +1971,7 @@ function wireToolbar() {
     d.characters.forEach(c => c.hidden = false);
     d.locations.forEach(l => l.hidden = false);
     d.pings.forEach(p => p.hidden = false);
+    (d.shades || []).forEach(x => x.hidden = false);
     persist(); renderAll(); toast('EVERYTHING VISIBLE');
   });
 
@@ -1746,100 +2003,12 @@ function wireToolbar() {
   document.addEventListener('pointerdown', e => {
     const dr = $('#mapDrawer');
     if (!dr.classList.contains('hidden') && !e.target.closest('#mapDrawer, #btnMaps')) dr.classList.add('hidden');
-    const cd = $('#calDrawer');
-    if (cd && !cd.classList.contains('hidden') && !e.target.closest('#calDrawer, #btnCal')) cd.classList.add('hidden');
   });
 
-  window.addEventListener('resize', () => { /* keep proportional; nothing needed, view is anchored */ });
+  window.addEventListener('resize', () => { updateTiles(); /* keep proportional; nothing else needed, view is anchored */ });
   window.addEventListener('beforeunload', () => persistNow());
 }
 
-/* ───────── calendar drawer ───────── */
-const MONTHS = ['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY','AUGUST','SEPTEMBER','OCTOBER','NOVEMBER','DECEMBER'];
-const livePingFor = key => dateHasPing(key);   // dateHasPing is active-date aware
-function renderCalendar() {
-  const grid = $('#calGrid');
-  if (!grid) return;
-  ensureTimeline();
-  const { y, m } = CAL.view;
-  const ys = $('#calYearSel');
-  if (ys && !ys.options.length) {
-    for (let yr = CAL.yearMin; yr <= CAL.yearMax; yr++) {
-      const o = document.createElement('option');
-      o.value = String(yr); o.textContent = yr;
-      ys.appendChild(o);
-    }
-  }
-  if (ys) ys.value = String(y);
-  const lab = $('#calMonthLab');
-  if (lab) lab.textContent = `${MONTHS[m]} ${y}`;
-  grid.innerHTML = '';
-  const first = new Date(Date.UTC(y, m, 1));
-  const days = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
-  const lead = (first.getUTCDay() + 6) % 7;   // Monday-start
-  for (let i = 0; i < lead; i++) {
-    const sp = document.createElement('span');
-    sp.className = 'cal-day pad';
-    grid.appendChild(sp);
-  }
-  const act = activeKey();
-  $('#calNone')?.classList.toggle('on', act === '');
-  for (let d = 1; d <= days; d++) {
-    const key = isoKey(y, m, d);
-    const cell = document.createElement('button');
-    cell.className = 'cal-day'
-      + (key === act ? ' on' : '')
-      + (livePingFor(key) ? ' hasping' : '');
-    cell.innerHTML = `<span class="cd-num">${d}</span>${livePingFor(key) ? '<span class="cd-dot"></span>' : ''}`;
-    if (key === act) cell.title = 'ACTIVE DATE';
-    else if (livePingFor(key)) cell.title = 'HAS STORY PING(S)';
-    cell.addEventListener('click', () => {
-      CAL.view = { y, m };
-      $('#calDrawer').classList.add('hidden');
-      switchDate(key);
-    });
-    grid.appendChild(cell);
-  }
-}
-function openCalDrawer() {
-  ensureTimeline();
-  // browse at the active date's month when possible
-  const k = activeKey();
-  if (k) {
-    const [yy, mm] = k.split('-').map(Number);
-    CAL.view = { y: Math.min(Math.max(yy, CAL.yearMin), CAL.yearMax), m: (mm || 1) - 1 };
-  }
-  renderCalendar();
-  $('#mapDrawer').classList.add('hidden');
-  $('#calDrawer').classList.remove('hidden');
-}
-function wireCalendar() {
-  const dr = $('#calDrawer');
-  if (!dr) return;
-  $('#btnCal')?.addEventListener('click', () => {
-    if (dr.classList.contains('hidden')) openCalDrawer();
-    else dr.classList.add('hidden');
-  });
-  $('#calClose').addEventListener('click', () => dr.classList.add('hidden'));
-  $('#calNone').addEventListener('click', () => { dr.classList.add('hidden'); switchDate(''); });
-  $('#calPrev').addEventListener('click', () => {
-    let { y, m } = CAL.view; m--;
-    if (m < 0) { m = 11; y = Math.max(CAL.yearMin, y - 1); }
-    if (y < CAL.yearMin) y = CAL.yearMin;
-    CAL.view = { y, m }; renderCalendar();
-  });
-  $('#calNext').addEventListener('click', () => {
-    let { y, m } = CAL.view; m++;
-    if (m > 11) { m = 0; y = Math.min(CAL.yearMax, y + 1); }
-    if (y > CAL.yearMax) y = CAL.yearMax;
-    CAL.view = { y, m }; renderCalendar();
-  });
-  $('#calYearSel').addEventListener('change', e => {
-    CAL.view.y = Math.min(Math.max(parseInt(e.target.value) || CAL.yearMin, CAL.yearMin), CAL.yearMax);
-    renderCalendar();
-  });
-  dr.addEventListener('pointerdown', e => e.stopPropagation());
-}
 /* ───────── live-sync hooks (exposed to sync.js) ───────── */
 window.AppHooks = {
   get state() { return state; },
@@ -1878,7 +2047,7 @@ function wireLivePanel() {
     const isBuiltin = window.AppSync?.usingBuiltin?.();
     $('#liveConfig').value = isBuiltin ? '' : JSON.stringify(window.AppSync.cfg(), null, 2);
     $('#liveConfig').placeholder = isBuiltin
-      ? 'EMPTY = BUILT-IN PROJECT (schungdar) — works out of the box. Paste your own Firebase config only if you want a private database.'
+      ? 'BLANK = PRECONFIGURED LIVE SYNC — works out of the box. Paste your own Firebase config only if you want a private database.'
       : 'Firebase config override is active';
     updateLivePanelStatus();
   };
@@ -1903,7 +2072,7 @@ function wireLivePanel() {
       window.AppSync.saveCfg(parsed, board);
       toast('USING CUSTOM FIREBASE PROJECT', 'amber');
     } else {
-      window.AppSync.saveCfg(null, board);   // built-in project
+      window.AppSync.saveCfg(null, board);   // preconfigured live sync
     }
     if (window.AppSync.isConnected()) window.AppSync.disconnect();
     const r = await window.AppSync.connect(null, board);
@@ -1914,7 +2083,7 @@ function wireLivePanel() {
   $('#liveForget').addEventListener('click', () => {
     window.AppSync.disconnect(); window.AppSync.saveCfg(null);
     $('#liveConfig').value = ''; updateLivePanelStatus();
-    toast('BACK TO BUILT-IN PROJECT', 'green');
+    toast('BACK TO PRECONFIGURED SYNC', 'green');
   });
 }
 function updateLivePanelStatus() {
@@ -1931,10 +2100,10 @@ function updateLivePanelStatus() {
 /* ───────── init ───────── */
 function init() {
   state = loadState();
+  try { adminOn = localStorage.getItem(ADMIN_KEY) === '1'; } catch (e) { }
   ensureBuiltins();
   runMapMigrations();
-  ensureTimeline();
-  updateCalTag();
+  migrateRosebridgeSectors();
   applyTheme();
   wireViewport();
   wireToolbar();
@@ -1946,9 +2115,8 @@ function init() {
   applyLabels();
   setSync(false);
   persist();
-  wireCalendar();
   wireLivePanel();
-  // auto-connect live sync on boot (built-in project; silent offline retry)
+  // auto-connect live sync on boot (preconfigured; silent offline retry)
   const tryBoot = (attempts = 0) => {
     if (!window.AppSync) return;
     window.AppSync.connect(null, null, { quiet: true }).then(r => {

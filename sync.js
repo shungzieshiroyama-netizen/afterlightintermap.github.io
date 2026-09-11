@@ -1,16 +1,15 @@
 /* ═══════════════════════════════════════════════════════════════
-   AFTERLIGHT // LIVE SYNC  (Firebase Realtime Database)
+   VIRTUS // LIVE SYNC  (Firebase Realtime Database)
    ─────────────────────────────────────────────────────────────
    Zero-setup live sharing of characters, locations and pings.
-   Ships with a built-in Firebase project (the "schungdar" RTDB
-   used by Schungzie's Radar); no console task needed — the app
-   auto-connects on load and everyone on the same BOARD CODE sees
-   changes in about a second.
+   Ships with a preconfigured Firebase project; no console task
+   needed — the app auto-connects on load and everyone on the same
+   BOARD CODE sees changes in about a second.
 
-   Data layout (kept separate from the radar's own tree):
-     afterlight/boards/<board>/entities/<mapId>__<type>__<id>  - markers (NO-DATE layer + global roster/locations)
-     afterlight/boards/<board>/entities/tl@<date>@<mapId>@cpos|pings - per-date timeline layers
-     afterlight/boards/<board>/presence/<uid>                  - who's online
+   Data layout (rooted under its own namespace):
+     virtus/boards/<board>/entities/<mapId>__<type>__<id>  - markers (NO-DATE layer + global roster/locations)
+     virtus/boards/<board>/entities/tl@<date>@<mapId>@cpos|pings - per-date timeline layers
+     virtus/boards/<board>/presence/<uid>                  - who's online
 
    If Firebase is unreachable / config invalid, the app behaves
    exactly like the offline version (LocalStorage + JSON export).
@@ -18,9 +17,9 @@
 'use strict';
 
 const AppSync = (() => {
-  /* Built-in Firebase project (Realtime Database) — the same one
-     powering Schungzie's Radar System. Public-facing keys are normal
-     for client-side Firebase apps; access is governed by DB rules. */
+    /* Preconfigured Firebase project (Realtime Database). Public-facing
+     keys are normal for client-side Firebase apps; access is governed
+     by DB rules. */
   const BUILTIN_CONFIG = {
     apiKey: "AIzaSyBRQ_UztF2lwcX81RVinv-5FBaumAclAuk",
     authDomain: "schungdar.firebaseapp.com",
@@ -31,18 +30,18 @@ const AppSync = (() => {
     appId: "1:448271329140:web:a69f2a5574d243e800ae21",
   };
 
-  const LS_CFG   = 'afterlight_live_config';   // optional override config
-  const LS_BOARD = 'afterlight_live_board';
-  const LS_NAME  = 'afterlight_live_name';
+  const LS_CFG   = 'virtus_live_config';   // optional override config
+  const LS_BOARD = 'virtus_live_board';
+  const LS_NAME  = 'virtus_live_name';
 
   let fbApp = null, rtdb = null;
   let entRef = null, presRef = null, meRef = null, connRef = null;
   let attached = false, connected = false, connecting = false;
   let lastSynced = {};        // docId -> canonical JSON (echo suppression)
   let pushTimer = null, suppressDiff = false, peerCount = 0;
-  let myId = localStorage.getItem('afterlight_live_uid')
-    || (localStorage.setItem('afterlight_live_uid', 'u' + Math.random().toString(36).slice(2, 10)),
-        localStorage.getItem('afterlight_live_uid'));
+  let myId = localStorage.getItem('virtus_live_uid')
+    || (localStorage.setItem('virtus_live_uid', 'u' + Math.random().toString(36).slice(2, 10)),
+        localStorage.getItem('virtus_live_uid'));
 
   const hooks = () => window.AppHooks;
 
@@ -70,7 +69,7 @@ const AppSync = (() => {
     const i = d.indexOf('__'), j = d.indexOf('__', i + 2);
     return { mapId: d.slice(0, i), type: d.slice(i + 2, j), id: d.slice(j + 2) };
   };
-  const listName = { character: 'characters', location: 'locations', ping: 'pings' };
+  const listName = { character: 'characters', location: 'locations', ping: 'pings', shade: 'shades' };
 
   /* canonical (stable, key-sorted) serialization for echo suppression */
   const sortKeysDeep = v => Array.isArray(v) ? v.map(sortKeysDeep)
@@ -122,7 +121,7 @@ const AppSync = (() => {
   function applyBucketLive(st, mapId, part) {
     const key = activeKeyOf(st);
     const b = st.timeline?.[key] || {};
-    const d = (st.data[mapId] ||= { characters: [], pings: [], locations: [] });
+    const d = (st.data[mapId] ||= { characters: [], pings: [], locations: [], shades: [] });
     if (part === 'cpos') {
       const pos = b.posByMap?.[mapId] || {};
       for (const c of (d.characters || [])) {
@@ -146,6 +145,7 @@ const AppSync = (() => {
       for (const [type, list] of [
         ['character', d.characters],
         ['location', d.locations],
+        ['shade', d.shades],
         // ping entities = the NO-DATE layer (live pings only when no date is active)
         ['ping', active === '' ? d.pings : (noDate.pingsByMap?.[mapId] || [])],
       ]) {
@@ -225,10 +225,10 @@ const AppSync = (() => {
     connecting = true; setStatus('busy');
     try {
       fbApp = firebase.apps && firebase.apps.length
-        ? (firebase.apps.find(a => a.options?.databaseURL === c.databaseURL) || firebase.initializeApp(c, 'afterlight-' + (c.projectId || 'x')))
-        : firebase.initializeApp(c, 'afterlight-main');
+        ? (firebase.apps.find(a => a.options?.databaseURL === c.databaseURL) || firebase.initializeApp(c, 'virtus-' + (c.projectId || 'x')))
+        : firebase.initializeApp(c, 'virtus-main');
       rtdb = firebase.database(fbApp);
-      const root = rtdb.ref(`afterlight/boards/${bd}`);
+      const root = rtdb.ref(`virtus/boards/${bd}`);
       entRef = root.child('entities');
       presRef = root.child('presence');
 
@@ -335,7 +335,7 @@ const AppSync = (() => {
     lastSynced[key] = cj;
     let changed = prevCanon !== cj;
     const active = activeKeyOf(st);
-    const d = (st.data[mapId] ||= { characters: [], pings: [], locations: [] });
+    const d = (st.data[mapId] ||= { characters: [], pings: [], locations: [], shades: [] });
     const list = d[ln] ||= [];
     const i = list.findIndex(x => String(x.id) === String(id));
     if (type === 'character' && active !== '') {
