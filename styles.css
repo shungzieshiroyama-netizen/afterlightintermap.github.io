@@ -66,7 +66,7 @@ input,textarea,select{font-family:var(--mono);color:var(--txt)}
 }
 .tb-group{display:flex;align-items:center;gap:4px}
 .tb-brand{gap:8px;margin-right:2px;user-select:none}
-.brand-seal{width:30px;height:30px;flex:none;filter:drop-shadow(0 0 6px rgba(240,244,248,.3))}
+.brand-seal{width:30px;height:30px;flex:none;filter:drop-shadow(0 0 6px rgba(212,175,55,.35))}
 
 /* ───────── loading screen ───────── */
 #loader{
@@ -79,13 +79,13 @@ input,textarea,select{font-family:var(--mono);color:var(--txt)}
 @keyframes ldRise{from{transform:translateY(10px);opacity:0}to{transform:none;opacity:1}}
 .ld-seal{width:180px;height:180px;animation:ldPulse 2.6s ease-in-out infinite}
 @keyframes ldPulse{
-  0%,100%{filter:drop-shadow(0 0 16px rgba(240,244,248,.22))}
-  50%{filter:drop-shadow(0 0 36px rgba(240,244,248,.46))}
+  0%,100%{filter:drop-shadow(0 0 16px rgba(212,175,55,.28))}
+  50%{filter:drop-shadow(0 0 36px rgba(212,175,55,.52))}
 }
-.ld-title{font-family:var(--mono);font-size:15px;letter-spacing:.34em;color:#f2f4f6;text-indent:.34em;text-align:center}
-.ld-sub{font-family:var(--mono);font-size:10px;letter-spacing:.54em;color:#8b95a3;text-indent:.54em}
-.ld-bar{width:220px;height:2px;background:rgba(240,244,248,.12);border-radius:2px;overflow:hidden;margin-top:10px}
-.ld-bar span{display:block;height:100%;width:40%;background:linear-gradient(90deg,transparent,#e9eef4,transparent);animation:ldScan 1.15s linear infinite}
+.ld-title{font-family:var(--mono);font-size:15px;letter-spacing:.34em;color:#e8e2cf;text-indent:.34em;text-align:center}
+.ld-sub{font-family:var(--mono);font-size:10px;letter-spacing:.54em;color:#b7a76a;text-indent:.54em}
+.ld-bar{width:220px;height:2px;background:rgba(232,226,207,.12);border-radius:2px;overflow:hidden;margin-top:10px}
+.ld-bar span{display:block;height:100%;width:40%;background:linear-gradient(90deg,transparent,#d4af37,transparent);animation:ldScan 1.15s linear infinite}
 @keyframes ldScan{from{transform:translateX(-120%)}to{transform:translateX(320%)}}
 .ld-status{font-family:var(--mono);font-size:8px;letter-spacing:.3em;color:#5f6a76}
 @media (prefers-reduced-motion:reduce){.ld-seal,.ld-bar span,.ld-inner{animation:none}}
@@ -146,13 +146,11 @@ body.light .tb-search{background:rgba(255,255,255,.4)}
   will-change:transform;
 }
 #world.anim{transition:transform .38s cubic-bezier(.22,.8,.24,1)}
-/* Virtus: NO zoom-out declutter — markers stay visible at every zoom level */
+/* marker declutter: at ~25% zoom or less, hide characters & locations (story pings stay) */
+#hud.far-zoom .mk,#hud.far-zoom .loc{display:none}
 #mapImg{display:block;user-select:none;-webkit-user-drag:none;max-width:none}
-#tileLayer{position:absolute;inset:0}
-.tile{position:absolute;display:block;user-select:none;-webkit-user-drag:none;pointer-events:none;max-width:none;max-height:none}
 
 #pingLayer,#locLayer,#markerLayer{position:absolute;inset:0;pointer-events:none}
-#pingLayer{z-index:8}#locLayer{z-index:9}#markerLayer{z-index:10}
 #pingLayer>*,#locLayer>*,#markerLayer>*{pointer-events:auto}
 
 /* ─────────────── LOCATION PINS (fixed place markers) ─────────────── */
@@ -332,39 +330,6 @@ body.light .pg-label{color:#7a4a05;background:rgba(255,250,240,.92)}
 .pg.lbl-t .pg-label{left:0;top:-14px;transform:translate(-50%,-100%)}
 .pg.lbl-b .pg-label{left:0;top:14px;transform:translate(-50%,0)}
 
-/* WARNING ping (activity alert) — red ⚠ under a pulsing ring */
-.pg.warn .warn-sign{
-  position:absolute;left:0;top:0;transform:translate(-50%,-58%);
-  font-size:17px;line-height:1;color:var(--pgc,#ff4438);
-  text-shadow:0 0 8px var(--pgc,#ff4438),0 1px 2px rgba(0,0,0,.8);
-}
-.pg.warn .pg-ring{animation:pgPulse 1s ease-out infinite}
-.pg.warn.sel .warn-sign{outline:2px solid #fff;outline-offset:3px}
-.pg.warn .pg-label{color:var(--pgc,#ff4438);border-color:rgba(255,80,64,.5);border-left:3px solid var(--pgc,#ff4438)}
-
-/* sidebar warn glyph */
-.ping-warn-glyph{display:inline-block;width:10px;margin-right:2px;color:#ff5b49;font-size:11px;
-  text-shadow:0 0 6px rgba(255,60,47,.6)}
-.pop-st-btn.warn.on{color:#ff7d6e;border-color:rgba(255,80,64,.65);background:rgba(255,60,47,.14)}
-
-/* ADMIN lock button */
-#btnAdmin{color:var(--faint)}
-#btnAdmin .ico{font-size:10px}
-#btnAdmin.on{color:#7de6a1;border-color:rgba(110,220,140,.6);
-  text-shadow:0 0 8px rgba(110,220,140,.45);background:rgba(110,220,140,.07)}
-
-/* RED ZONE shading — lives inside #world so it scales with the map */
-#shadeLayer{position:absolute;inset:0;z-index:1;pointer-events:none}
-.shade{
-  position:absolute;border-radius:50%;pointer-events:auto;cursor:pointer;
-  transform:translate(-50%,-50%);
-  border:1.5px dashed;
-  user-select:none;touch-action:none;
-}
-.shade.sel{border-style:solid;box-shadow:0 0 0 2px rgba(255,255,255,.35),inset 0 0 46px rgba(255,47,47,.25)}
-.shade.drag{cursor:grabbing}
-.pop-st-btn.shade-lv.on{color:#ff7d6e;border-color:rgba(255,80,64,.65);background:rgba(255,60,47,.14)}
-
 /* overlapping labels fade out; hover the marker to read them */
 .mk-label,.loc-label,.pg-label{transition:opacity .15s}
 .mk-label.lbl-dim,.loc-label.lbl-dim,.pg-label.lbl-dim{opacity:.1}
@@ -387,26 +352,29 @@ body.light .pg-label{color:#7a4a05;background:rgba(255,250,240,.92)}
 .pc.inv.on{opacity:1;border-color:var(--acc);background:var(--acc-dim)}
 body.light .pc{background:rgba(0,0,0,.04)}
 
-/* sector menu (3x3 grid over the moderate-quality overview image) */
-.sector-menu{position:relative;grid-column:1/-1;border:1px solid var(--line-hi);border-radius:6px;overflow:hidden;background:#000;margin-bottom:6px}
-.sector-menu .sm-img{display:block;width:100%;user-select:none;-webkit-user-drag:none;opacity:.92}
-.sector-menu .sm-cell{
-  position:absolute;width:33.334%;height:33.334%;padding:0;margin:0;
-  background:transparent;border:0;border-right:1px solid rgba(140,220,200,.35);border-bottom:1px solid rgba(140,220,200,.35);
-  cursor:pointer;transition:background .12s,box-shadow .12s;
+/* dated ghost pings (NO DATE aggregated view) */
+.pg.ghost{opacity:.82}
+.pg.ghost .pg-core{background:var(--amb);border-style:dashed;box-shadow:0 0 0 2px rgba(0,0,0,.55),0 0 10px 1px var(--amb)}
+.pg.ghost .pg-ring{border-style:dashed;animation-duration:2.6s}
+.pg.ghost:hover{opacity:1}
+.pg.ghost:hover .pg-core{outline:2px solid #fff;outline-offset:3px}
+.pg-date{display:block;font-size:8px;font-weight:400;letter-spacing:.12em;color:var(--amb);opacity:.85;margin-top:2px}
+body.light .pg-date{color:#8a5a10}
+
+/* ghost rows in the sidebar ping list */
+.ghost-head{padding:10px 10px 4px;font-size:8px;letter-spacing:.2em;color:var(--faint)}
+.ping-row.ghost-row .ping-name{color:var(--dim)}
+.ghost-date{display:block;font-size:8px;letter-spacing:.1em;color:var(--amb);margin-top:1px}
+.ping-dot.ghost-dot{border-style:dashed;opacity:.75}
+
+/* ghost ping popover note */
+.pop-ghost-note{
+  width:100%;box-sizing:border-box;background:rgba(255,179,71,.06);
+  border:1px solid rgba(255,179,71,.3);border-left:3px solid var(--amb);
+  border-radius:3px;padding:7px 9px;margin-bottom:10px;
 }
-.sector-menu .sm-cell:hover{background:rgba(93,242,192,.14);box-shadow:inset 0 0 0 1px var(--acc)}
-.sector-menu .sm-cell.on{background:rgba(93,242,192,.2);box-shadow:inset 0 0 0 2px var(--acc)}
-.sector-menu .sm-name{
-  position:absolute;top:4px;left:6px;font-family:var(--mono);font-size:9px;letter-spacing:.18em;
-  color:#dff5ec;text-shadow:0 1px 3px rgba(0,0,0,.9);opacity:.55;transition:opacity .12s;pointer-events:none;
-}
-.sector-menu .sm-cell:hover .sm-name,.sector-menu .sm-cell.on .sm-name{opacity:1;color:var(--acc)}
-.sector-menu .sm-count{
-  position:absolute;bottom:4px;right:5px;font-size:8px;letter-spacing:.08em;color:var(--amb);
-  text-shadow:0 1px 3px rgba(0,0,0,.9);pointer-events:none;
-}
-body.light .sector-menu .sm-name{text-shadow:none}
+.pop-ghost-name{font-size:11px;font-weight:700;letter-spacing:.12em;color:var(--amb)}
+.pop-ghost-sub{font-size:8px;letter-spacing:.12em;color:var(--dim);margin-top:4px}
 
 /* ─────────────── POPOVER ─────────────── */
 
@@ -653,7 +621,38 @@ body.light .pop-note{background:rgba(255,255,255,.5)}
 .x-btn{color:var(--faint);font-size:12px;padding:2px 6px}
 .x-btn:hover{color:var(--danger)}
 
-/* unplaced characters (roster entries not yet positioned on the map) */
+/* ───────── timeline calendar drawer ───────── */
+#calDrawer{
+  position:absolute;left:0;top:46px;bottom:26px;width:308px;z-index:80;
+  background:var(--panel);border-right:1px solid var(--line-hi);
+  backdrop-filter:blur(12px);box-shadow:var(--shadow);
+  display:flex;flex-direction:column;
+  animation:drawerIn .22s ease-out;
+}
+.cal-controls{padding:10px 12px 8px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line)}
+.cal-brow{display:flex;gap:8px;align-items:flex-end}
+.cal-none{flex:1;line-height:1.5}
+.cn-sub{font-size:8px;color:var(--faint);letter-spacing:.14em}
+.cal-none.on{border-color:var(--amb);color:var(--amb)}
+.cal-ywrap{display:flex;flex-direction:column;flex:1.2}
+.cal-monthrow{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.cal-monthrow span{font-size:11px;letter-spacing:.22em;color:var(--acc)}
+.cal-week{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;padding:10px 12px 2px}
+.cal-week span{font-size:8px;color:var(--faint);letter-spacing:.14em;text-align:center}
+#calGrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;padding:6px 12px 12px;overflow-y:auto}
+.cal-day{
+  position:relative;aspect-ratio:1;border:1px solid var(--line);border-radius:4px;
+  background:rgba(120,220,190,.03);color:var(--txt);font-family:var(--mono);font-size:9px;
+  cursor:pointer;letter-spacing:.04em;transition:all .12s;padding:0;
+}
+.cal-day:hover{border-color:var(--acc);color:#fff;background:var(--acc-dim)}
+.cal-day.on{border-color:var(--acc);background:var(--acc-dim);color:var(--acc);box-shadow:0 0 8px var(--acc-dim)}
+.cal-day.pad{visibility:hidden}
+.cd-dot{position:absolute;bottom:3px;left:50%;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--amb);box-shadow:0 0 6px var(--amb)}
+.cd-dot.inline{position:static;transform:none;display:inline-block;vertical-align:middle;margin-right:2px}
+.cal-foot{padding:10px 12px;border-top:1px solid var(--line);font-size:8px;letter-spacing:.1em;color:var(--dim);line-height:1.9}
+
+/* unplaced characters (no position on the active date) */
 .char-row.is-unplaced .char-name{color:var(--dim);font-style:italic}
 .char-row.is-unplaced .char-dot,.char-row.is-placing .char-dot{opacity:.35}
 .char-row.is-placing{background:rgba(255,179,71,.08);border-color:var(--amb)}

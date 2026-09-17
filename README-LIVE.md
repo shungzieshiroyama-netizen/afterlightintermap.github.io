@@ -1,4 +1,4 @@
-# VIRTUS // LIVE SYNC & NETLIFY DEPLOYMENT
+# AFTERLIGHT // LIVE SYNC & NETLIFY DEPLOYMENT
 
 **Live sharing is built-in and needs zero setup.** The tracker ships
 pre-connected to a shared Firebase Realtime Database (the same project
@@ -20,7 +20,7 @@ open the page → you're live.
 - The app **auto-connects** on load to the default board (`public`).
 - Click **◉ LIVE** to switch boards: any group on the same **BOARD CODE**
   shares the same markers. You can also link straight to a board:
-  `https://your-site.netlify.app/?board=virtus-crew`
+  `https://your-site.netlify.app/?board=afterlight-crew`
 - Set your **call sign** in the LIVE panel — the panel and status bar show
   how many operators are online right now.
 

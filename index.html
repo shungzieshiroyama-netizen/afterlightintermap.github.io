@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VIRTUS // CHARACTER TRACKER</title>
+<title>AFTERLIGHT // CHARACTER TRACKER</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -11,9 +11,9 @@
 <!-- ══════════ LOADING SCREEN ══════════ -->
 <div id="loader">
   <div class="ld-inner">
-    <img class="ld-seal" src="assets/nexa.png" alt="NEXA Arms Division emblem">
-    <div class="ld-title">NEXA ARMS DIVISION</div>
-    <div class="ld-sub">VIRTUS TRACKER</div>
+    <img class="ld-seal" src="assets/fbc-seal.png" alt="Federal Bureau of Control seal">
+    <div class="ld-title">FEDERAL BUREAU OF CONTROL</div>
+    <div class="ld-sub">AFTERLIGHT CITY</div>
     <div class="ld-bar"><span></span></div>
     <div class="ld-status">ESTABLISHING UPLINK…</div>
   </div>
@@ -24,17 +24,21 @@
   <!-- ══════════ TOP BAR ══════════ -->
   <header id="topbar">
     <div class="tb-group tb-brand">
-      <img class="brand-seal" src="assets/nexa-96.png" alt="NEXA Arms Division emblem">
+      <img class="brand-seal" src="assets/fbc-seal-96.png" alt="Federal Bureau of Control — Afterlight City seal">
       <div class="brand-text">
-        <span class="brand-title">VIRTUS</span>
-        <span class="brand-sub">NEXA ARMS DIVISION</span>
+        <span class="brand-title">AFTERLIGHT</span>
+        <span class="brand-sub">FEDERAL BUREAU OF CONTROL</span>
       </div>
     </div>
 
     <div class="tb-sep"></div>
 
-    <button class="tb-btn" id="btnMaps" title="Switch map / sectors">
+    <button class="tb-btn" id="btnMaps" title="Switch map">
       <span class="ico">▦</span> MAPS <span id="mapNameTag" class="tag">—</span>
+    </button>
+
+    <button class="tb-btn" id="btnCal" title="Timeline calendar — each date has its own timeline of markers & story pings">
+      <span class="ico">◷</span> CAL <span id="calTag" class="tag">NO DATE</span>
     </button>
 
     <div class="tb-sep"></div>
@@ -44,11 +48,7 @@
       <button class="tb-btn mode active" data-mode="add" title="Click map to place a character (N)"><span class="ico">＋</span> ADD</button>
       <button class="tb-btn mode" data-mode="loc" title="Click map to mark a fixed location (B)"><span class="ico">⌂</span> LOC</button>
       <button class="tb-btn mode" data-mode="ping" title="Click map to drop a ping (P)"><span class="ico">⚑</span> PING</button>
-      <button class="tb-btn mode hidden" data-mode="warn" data-admin="1" title="Click map to drop a warning ping — howler activity (W)"><span class="ico">⚠</span> WARN</button>
-      <button class="tb-btn mode hidden" data-mode="shade" data-admin="1" title="Click map to shade a red zone (S)"><span class="ico">◍</span> SHADE</button>
     </div>
-
-    <button class="tb-btn" id="btnAdmin" title="Admin mode — control red zones &amp; warning pings"><span class="ico">🔒</span> ADMIN</button>
 
     <div class="tb-search">
       <span class="search-ico">⌕</span>
@@ -84,9 +84,7 @@
 
     <div id="viewport">
       <div id="world">
-        <div id="tileLayer" style="display:none"></div>
         <img id="mapImg" alt="map" draggable="false">
-        <div id="shadeLayer"></div>
       </div>
       <div id="hud">
         <div id="pingLayer"></div>
@@ -185,6 +183,35 @@
     <div id="mapGrid"></div>
   </div>
 
+  <!-- ══════════ TIMELINE CALENDAR ══════════ -->
+  <div id="calDrawer" class="hidden">
+    <div class="drawer-head">
+      <span id="calTitle">TIMELINE — 2085–2100</span>
+      <button class="x-btn" id="calClose">✕</button>
+    </div>
+    <div class="cal-controls">
+      <div class="cal-brow">
+        <button class="mini-btn cal-none" id="calNone" title="Show everything without a date filter">NO DATE<br><span class="cn-sub">SHOW ALL</span></button>
+        <div class="cal-ywrap">
+          <label class="fld-lab" for="calYearSel">YEAR</label>
+          <select id="calYearSel" class="fld-inp cal-year"></select>
+        </div>
+      </div>
+      <div class="cal-monthrow">
+        <button class="mini-btn" id="calPrev">‹</button>
+        <span id="calMonthLab">JANUARY 2085</span>
+        <button class="mini-btn" id="calNext">›</button>
+      </div>
+    </div>
+    <div class="cal-week"><span>MO</span><span>TU</span><span>WE</span><span>TH</span><span>FR</span><span>SA</span><span>SU</span></div>
+    <div id="calGrid"></div>
+    <div class="cal-foot">
+      <span class="cd-dot inline"></span> = date has story pings &nbsp;·&nbsp; outlined = active date
+      <br>Press a date → character positions &amp; pings switch to that timeline. Locations &amp; roster stay.
+      <br>NO DATE = atlas view — characters hidden, all dated pings shown as ghosts.
+    </div>
+  </div>
+
   <!-- ══════════ MODAL ══════════ -->
   <div id="modal" class="hidden">
     <div class="modal-veil"></div>
@@ -205,7 +232,7 @@
         <div class="fld">
           <label class="fld-lab" for="liveBoard">BOARD CODE (everyone on the same code shares the same markers)</label>
           <input id="liveBoard" class="fld-inp" type="text" placeholder="public" maxlength="40" spellcheck="false" autocomplete="off">
-          <div class="fld-help">Share the board code with your group — e.g. <b>virtus-crew</b>. You can also link directly: <b>your-url.netlify.app/?board=virtus-crew</b></div>
+          <div class="fld-help">Share the board code with your group — e.g. <b>afterlight-crew</b>. You can also link directly: <b>your-url.netlify.app/?board=afterlight-crew</b></div>
         </div>
         <div class="fld">
           <label class="fld-lab" for="liveName">YOUR CALL SIGN (shown on presence counter)</label>
@@ -214,7 +241,7 @@
         <div class="fld">
           <label class="fld-lab" for="liveConfig">ADVANCED: CUSTOM FIREBASE CONFIG (leave empty to use the built-in database)</label>
           <textarea id="liveConfig" class="fld-inp live-ta" spellcheck="false"></textarea>
-          <div class="fld-help">Built-in live sync is preconfigured — no setup required. Paste your own Firebase config only if you want your markers on a private database.</div>
+          <div class="fld-help">Built-in = the same Firebase project that powers Schungzie's Radar — no setup required. Paste your own config only if you want your markers on a private database.</div>
         </div>
       </div>
       <div class="modal-actions">
@@ -229,7 +256,7 @@
   <input type="file" id="uploadMap" accept="image/*,.kmz,application/vnd.google-earth.kmz" hidden>
 </div>
 
-<!-- Firebase SDK (compat) for live sync; the app works offline if these fail to load -->
+<!-- Firebase SDK (compat) for live sync — same RTDB combo as Schungzie Radar; app works offline if these don't load -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script src="app.js"></script>
