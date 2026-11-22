@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════
    AFTERLIGHT // CHARACTER TRACKER
-   Client-side character position tracker for roleplay maps.
+   Client-side scene atlas and cast roster for roleplay maps.
    ═══════════════════════════════════════════════════════════════ */
 'use strict';
 
@@ -45,7 +45,7 @@ const pop = $('#pop'), veil = $('#veil'), hint = $('#hint'), coordsBox = $('#coo
 
 /* ───────── state ───────── */
 let state = null;
-let mode = 'select';                 // 'select' | 'add' | 'ping'
+let mode = 'select';              // 'select' | 'loc' | 'ping'
 let sel = null;                   // {type:'char'|'ping', id}
 let dragSnap = null;              // snapshot taken when a marker drag starts
 let suppressMapClick = false;
@@ -208,7 +208,7 @@ function switchDate(key) {
   sel = null; closePop();
   persist(); renderAll(); updateCalTag();
   toast(key === '' ? 'TIMELINE: NO DATE — ATLAS VIEW (LOCATIONS & STORY PINGS ONLY)'
-    : `TIMELINE SET — ${key} (CHARACTER POSITIONS & PINGS CLEARED FOR THIS DATE)`, 'green');
+    : `TIMELINE SET — ${key}`, 'green');
 }
 function dateHasPing(key) {
   // the ACTIVE date's pings live in the working data, not the stored bucket
@@ -225,7 +225,11 @@ function updateCalTag() {
 
 /* scrub a deleted character from every date bucket */
 function scrubCharEverywhere(id) {
+  for (const d of Object.values(state.data || {}))
+    for (const p of (d.pings || [])) p.chars = (p.chars || []).filter(cid => cid !== id);
   for (const b of Object.values(state.timeline || {})) {
+    for (const pings of Object.values(b.pingsByMap || {}))
+      for (const p of pings) p.chars = (p.chars || []).filter(cid => cid !== id);
     for (const pos of Object.values(b.posByMap || {})) delete pos[id];
   }
 }
@@ -334,7 +338,7 @@ function placePendingAt(mx, my) {
 }
 /* ───────── history (undo / redo) ───────── */
 const undoStack = [], redoStack = [];
-const snapshot = () => JSON.parse(JSON.stringify({ cur: state.current, data: state.data }));
+const snapshot = () => JSON.parse(JSON.stringify({ cur: state.current, data: state.data, timeline: state.timeline, calendar: state.calendar }));
 function pushHistory(snap) {
   undoStack.push(snap || snapshot());
   if (undoStack.length > 60) undoStack.shift();
@@ -343,6 +347,9 @@ function pushHistory(snap) {
 }
 function restoreSnap(s) {
   state.data = s.data;
+  if (s.timeline) state.timeline = s.timeline;
+  if (s.calendar) state.calendar = s.calendar;
+  updateCalTag();
   if (s.cur !== state.current) switchMap(s.cur, { silent: true, skipViewSave: true });
   sel = null; closePop(); renderAll(); persist();
 }
@@ -436,7 +443,7 @@ function switchMap(id, opts = {}) {
     renderAll();
     if (opts.focus) {
       const fp = curData().pings.find(x => x.id === opts.focus);
-      if (fp) { sel = { type: 'ping', id: fp.id }; renderAll(); centerOn(fp.x, fp.y, false); }
+      if (fp) { sel = { type: 'ping', id: fp.id }; renderAll(); centerOn(fp.x, fp.y, false); openPingPop(fp, viewport.clientWidth / 2, viewport.clientHeight / 2); }
     }
     if (!opts.silent) toast(`MAP LOADED — ${m.name.toUpperCase()}`);
     if (id === 'afterlight-city') { renderDrawer(); $('#mapDrawer').classList.remove('hidden'); }
@@ -661,20 +668,23 @@ function gotoPing(mapId, key, id) {
   if (needDate) switchDate(key);
   if (needMap) { toast(`JUMPING TO PING — ${mapNameOf(mapId).toUpperCase()}${key ? ' · ' + key : ' · NO DATE'}`); switchMap(mapId, { silent: true, focus: id }); return; }
   const p = curData().pings.find(x => x.id === id);
-  if (p) { sel = { type: 'ping', id }; renderAll(); centerOn(p.x, p.y); }
+  if (p) { sel = { type: 'ping', id }; renderAll(); centerOn(p.x, p.y); openPingPop(p, viewport.clientWidth / 2, viewport.clientHeight / 2); }
 }
 /* flip a ping's visible flag in whichever map/date bucket owns it */
 function togglePingHidden(mapId, key, id) {
   let tp;
   if (key === activeKey()) tp = state.data[mapId]?.pings?.find(x => x.id === id);
   else tp = state.timeline?.[key]?.pingsByMap?.[mapId]?.find(x => x.id === id);
-  if (tp) tp.hidden = !tp.hidden;
+  if (!tp) return;
+  pushHistory();
+  tp.hidden = !tp.hidden;
   persist(); renderPings(); renderSidebar();
 }
 
 /* delete a ping from whichever map/date bucket owns it */
 function deleteGlobalPing(mapId, key, id) {
   if (key === activeKey() && mapId === state.current) { deletePing(id); return; }
+  pushHistory();
   if (key === activeKey()) {
     const dd = state.data[mapId];
     if (dd) dd.pings = (dd.pings || []).filter(p => p.id !== id);
@@ -698,17 +708,20 @@ function renderSidebar() {
   const list = $('#charList');
   list.innerHTML = '';
   const chars = d.characters.filter(c => !q || c.name.toLowerCase().includes(q));
-  const noDate = activeKey() === '';
   if (!chars.length) {
-    list.innerHTML = `<div class="empty-msg">${q ? 'NO MATCHES FOUND' : 'NO CHARACTERS IN THIS ROSTER'}</div>`;
+    list.innerHTML = `<div class="empty-msg">${q ? 'NO MATCHES FOUND' : 'NO CAST YET — ADD A CHARACTER BELOW'}</div>`;
   }
   for (const c of chars) {
     const row = document.createElement('div');
     row.className = 'char-row';
     row.innerHTML = `<span class="char-name">${esc(c.name)}</span>
-      <span class="row-btns"><button class="rb warn" data-act="del" title="Remove character">✕</button></span>`;
+      <span class="row-btns"><button class="rb" data-act="edit" title="Rename character">✎</button><button class="rb warn" data-act="del" title="Remove character from roster and scenes">✕</button></span>`;
     row.addEventListener('click', e => {
-      if (e.target.closest('.rb')?.dataset.act === 'del') deleteChar(c.id);
+      if (e.target.closest('.rb')?.dataset.act === 'del') {
+        openModal('REMOVE CHARACTER', `Remove <b>${esc(c.name)}</b> from this roster and its scenes?`, [
+          { label: 'CANCEL' }, { label: 'REMOVE', cls: 'danger', fn: () => deleteChar(c.id) }
+        ]);
+      } else openCastEditor(c);
     });
     list.appendChild(row);
   }
@@ -785,7 +798,7 @@ function openPop(build, px, py) {
   pop.style.left = clamp(px + 14, 8, viewport.clientWidth - w - 8) + 'px';
   pop.style.top  = clamp(py - 20, 8, viewport.clientHeight - h - 8) + 'px';
 }
-function closePop() { pop.classList.add('hidden'); pop.innerHTML = ''; }
+function closePop() { pop.refreshCast = null; pop.classList.add('hidden'); pop.innerHTML = ''; }
 
 function popHeader(el, title) {
   el.innerHTML = `<div class="pop-title"><span>${title}</span><button class="x" data-x>✕</button></div>`;
@@ -993,36 +1006,104 @@ function popPingStatus(el, p) {
 }
 
 function popInvolvedChars(el, p) {
-  p.chars ||= [];
+  const mapId = state.current, key = activeKey();
+  const live = () => state.current === mapId && activeKey() === key
+    ? curData().pings.find(x => x.id === p.id) : null;
   const wrap = document.createElement('div');
   wrap.className = 'pop-inv';
-  wrap.innerHTML = `<div class="pop-inv-title">CHARACTERS INVOLVED</div>`;
-  const box = document.createElement('div');
-  box.className = 'inv-chips';
-  const roster = curData().characters;
-  if (!roster.length) {
-    const none = document.createElement('div');
-    none.className = 'pop-inv-none';
-    none.textContent = 'NO CHARACTERS YET — ADD THEM IN ＋ MODE';
-    box.appendChild(none);
+  const title = document.createElement('div');
+  title.className = 'pop-inv-title'; title.setAttribute('aria-live', 'polite');
+  const search = document.createElement('input');
+  search.className = 'pop-input cast-search'; search.placeholder = 'Find or add a character…';
+  search.maxLength = 40; search.setAttribute('aria-label', 'Find or add a scene character');
+  const box = document.createElement('div'); box.className = 'inv-chips';
+  const add = document.createElement('button'); add.className = 'pbtn cast-create';
+  const paint = () => {
+    const scene = live(); if (!scene) return;
+    const roster = curData().characters;
+    const q = search.value.trim().toLowerCase();
+    title.textContent = `SCENE CAST · ${roster.filter(c => (scene.chars || []).includes(c.id)).length} SELECTED`;
+    box.innerHTML = '';
+    const matches = roster.filter(c => !q || c.name.toLowerCase().includes(q))
+      .slice().sort((a, b) => a.name.localeCompare(b.name));
+    if (!matches.length) {
+      const empty = document.createElement('div'); empty.className = 'pop-inv-none';
+      empty.textContent = q ? 'No matching characters.' : 'Add your first cast member below.';
+      box.appendChild(empty);
+    }
+    for (const c of matches) {
+      const selected = (scene.chars || []).includes(c.id);
+      const button = document.createElement('button');
+      button.className = 'pc inv' + (selected ? ' on' : '');
+      button.setAttribute('aria-pressed', String(selected));
+      button.textContent = `${selected ? '✓ ' : '+ '}${c.name}`;
+      button.addEventListener('click', () => {
+        if (!live()) return;
+        if (setSceneCharacter(p.id, c.id, !((live()?.chars || []).includes(c.id)))) paint();
+      });
+      box.appendChild(button);
+    }
+    add.hidden = !q || roster.some(c => c.name.trim().toLowerCase() === q);
+    add.textContent = `ADD “${search.value.trim()}” TO SCENE`;
+  };
+  search.addEventListener('input', paint);
+  search.addEventListener('keydown', e => e.stopPropagation());
+  add.addEventListener('click', () => {
+    if (!live()) return;
+    const c = createCastCharacter(search.value, p.id);
+    if (c) { search.value = ''; paint(); }
+  });
+  wrap.append(title, search, box, add); el.appendChild(wrap);
+  el.refreshCast = paint; paint();
+}
+
+// Characters belong to a map's roster, not to a position or a date.
+function createCastCharacter(name, sceneId) {
+  name = String(name || '').trim().slice(0, 40);
+  if (!name) { toast('ENTER A CHARACTER NAME', 'amber'); return null; }
+  const d = curData(), scene = sceneId ? d.pings.find(p => p.id === sceneId) : null;
+  if (sceneId && !scene) return null;
+  let c = d.characters.find(c => c.name.trim().toLowerCase() === name.toLowerCase());
+  if (c && (!scene || (scene.chars || []).includes(c.id))) return c;
+  pushHistory();
+  if (!c) {
+    c = { id: uid(), name, color: COLORS[d.characters.length % COLORS.length], unplaced: true };
+    d.characters.push(c);
   }
-  for (const c of roster) {
-    const b = document.createElement('button');
-    b.className = 'pc inv' + (p.chars.includes(c.id) ? ' on' : '');
-    b.innerHTML = `<i style="background:${esc(c.color || COLORS[0])}"></i>${esc(c.name)}`;
-    b.addEventListener('click', () => {
-      const live = curData().pings.find(x => x.id === p.id) || p;
-      live.chars ||= [];
-      const j = live.chars.indexOf(c.id);
-      pushHistory();
-      if (j >= 0) live.chars.splice(j, 1); else live.chars.push(c.id);
-      persist(); renderSidebar();
-      b.classList.toggle('on', live.chars.includes(c.id));
-    });
-    box.appendChild(b);
+  if (scene) scene.chars = [...new Set([...(scene.chars || []), c.id])];
+  persist(); renderAll(); return c;
+}
+function setSceneCharacter(sceneId, charId, included) {
+  const d = curData(), p = d.pings.find(p => p.id === sceneId);
+  if (!p || !d.characters.some(c => c.id === charId)) return false;
+  if ((p.chars || []).includes(charId) === included) return false;
+  pushHistory();
+  p.chars = (p.chars || []).filter(id => id !== charId);
+  if (included) p.chars.push(charId);
+  persist(); renderSidebar(); return true;
+}
+function renameCastCharacter(id, name) {
+  name = String(name || '').trim().slice(0, 40);
+  const d = curData(), c = d.characters.find(c => c.id === id);
+  if (!c || !name) return false;
+  if (d.characters.some(x => x.id !== id && x.name.trim().toLowerCase() === name.toLowerCase())) {
+    toast('THAT CHARACTER IS ALREADY IN THE ROSTER', 'amber'); return false;
   }
-  wrap.appendChild(box);
-  el.appendChild(wrap);
+  if (c.name === name) return true;
+  pushHistory(); c.name = name; persist(); renderAll(); return true;
+}
+function openCastEditor(c) {
+  openPop(el => {
+    popHeader(el, c ? 'RENAME CHARACTER' : 'NEW CHARACTER');
+    const input = document.createElement('input'); input.className = 'pop-input';
+    input.maxLength = 40; input.value = c?.name || ''; input.placeholder = 'Character name…';
+    input.setAttribute('aria-label', 'Character name');
+    const save = document.createElement('button'); save.className = 'pbtn'; save.textContent = c ? 'SAVE NAME' : 'ADD TO ROSTER';
+    const commit = () => { if (c ? renameCastCharacter(c.id, input.value) : createCastCharacter(input.value)) closePop(); };
+    save.addEventListener('click', commit);
+    input.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') commit(); });
+    el.append(input, save); setTimeout(() => input.focus(), 30);
+  }, viewport.clientWidth / 2, 100);
 }
 
 /* instantly commit a ping's label (popup SET button, Enter key, input debounce) */
@@ -1033,7 +1114,7 @@ function setPingLabel(id, v) {
 }
 function openPingPop(p, px, py) {
   openPop(el => {
-    popHeader(el, 'PING');
+    popHeader(el, 'SCENE');
     const live = () => curData().pings.find(x => x.id === p.id) || p;
     const inp = document.createElement('input');
     inp.className = 'pop-input'; inp.value = p.label || ''; inp.placeholder = 'LABEL (e.g. MEETING POINT)…';
@@ -1375,6 +1456,7 @@ function captureView() {
 
     // locations (fixed place pins)
     for (const l of curData().locations) {
+      if (l.hidden) continue;
       const sx = l.x * view.z + view.tx, sy = l.y * view.z + view.ty;
       const col = l.color || '#e8edf2';
       x.save();
@@ -1388,6 +1470,7 @@ function captureView() {
     }
     // pings
     for (const p of curData().pings) {
+      if (p.hidden) continue;
       const sx = p.x * view.z + view.tx, sy = p.y * view.z + view.ty;
       x.save();
       x.translate(sx, sy); x.rotate(Math.PI / 4);
@@ -1396,21 +1479,6 @@ function captureView() {
       x.fillRect(-6, -6, 12, 12);
       x.restore();
       if (state.labels && p.label) drawLabel(x, p.label, sx + 12, sy, '#ffb347', '#ffb347');
-    }
-    // characters
-    for (const c of curData().characters) {
-      if (c.hidden) continue;
-      const sx = c.x * view.z + view.tx, sy = c.y * view.z + view.ty;
-      x.save();
-      if (c.shape === 'diamond') { x.translate(sx, sy); x.rotate(Math.PI / 4); x.translate(-sx, -sy); }
-      x.beginPath();
-      if (!c.shape || c.shape === 'circle') x.arc(sx, sy, c.avatar ? 13 : 7, 0, 7);
-      else x.rect(sx - 7, sy - 7, 14, 14);
-      x.fillStyle = c.color; x.shadowColor = c.color; x.shadowBlur = 12;
-      x.fill();
-      x.shadowBlur = 0; x.lineWidth = 2; x.strokeStyle = 'rgba(255,255,255,.9)'; x.stroke();
-      x.restore();
-      if (state.labels) drawLabel(x, c.name, sx + (c.avatar ? 18 : 12), sy, c.color, '#eafff7');
     }
     const a = document.createElement('a');
     a.download = `afterlight-map-${state.current}.png`;
@@ -1655,10 +1723,10 @@ function wireToolbar() {
   });
   $('#btnHelp').addEventListener('click', showHelp);
   $('#btnClear').addEventListener('click', confirmClear);
+  $('#btnAddCast').addEventListener('click', () => openCastEditor(null));
   $('#btnHideAll').addEventListener('click', () => {
     pushHistory();
     const d = curData();
-    d.characters.forEach(c => c.hidden = true);
     d.locations.forEach(l => l.hidden = true);
     d.pings.forEach(p => p.hidden = true);
     persist(); renderAll(); toast('EVERYTHING HIDDEN');
@@ -1666,7 +1734,6 @@ function wireToolbar() {
   $('#btnShowAll').addEventListener('click', () => {
     pushHistory();
     const d = curData();
-    d.characters.forEach(c => c.hidden = false);
     d.locations.forEach(l => l.hidden = false);
     d.pings.forEach(p => p.hidden = false);
     persist(); renderAll(); toast('EVERYTHING VISIBLE');
@@ -1802,6 +1869,7 @@ window.AppHooks = {
   applyRemote(touchedMaps, touched) {
     // refresh UI for entities changed by other clients
     renderAll(); updateStatus();
+    pop.refreshCast?.();
     persistNowLocal();
   },
 };
