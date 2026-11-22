@@ -791,6 +791,7 @@ function selectPing(id) { sel = { type: 'ping', id }; renderPings(); renderSideb
 
 /* ───────── popover ───────── */
 function openPop(build, px, py) {
+  window.MobileUI?.prepareEditor();
   closePop();
   build(pop);
   pop.classList.remove('hidden');
@@ -1137,7 +1138,7 @@ function openPingPop(p, px, py) {
       if (a === 'del') deletePing(live().id);
     });
     el.appendChild(act);
-    setTimeout(() => inp.focus(), 30);
+    if (!window.matchMedia?.('(pointer: coarse)').matches) setTimeout(() => inp.focus(), 30);
   }, px, py);
 }
 
@@ -1223,7 +1224,7 @@ function startEntityDrag(e, ent, el, kind) {
   const onMove = ev => {
     const p = evPos(ev);
     const dx = (p.px - start.px) / view.z, dy = (p.py - start.py) / view.z;
-    if (!start.moved && Math.hypot(p.px - start.px, p.py - start.py) < 4) return;
+    if (!start.moved && Math.hypot(p.px - start.px, p.py - start.py) < (ev.pointerType === 'touch' ? 12 : 4)) return;
     start.moved = true;
     closePop();
     ent.x = start.x + dx; ent.y = start.y + dy;
@@ -1231,6 +1232,7 @@ function startEntityDrag(e, ent, el, kind) {
     window.liveDragTick?.();
   };
   const onUp = ev => {
+    el.removeEventListener('pointercancel', onCancel);
     el.removeEventListener('pointermove', onMove);
     el.removeEventListener('pointerup', onUp);
     el.classList.remove('drag');
@@ -1241,13 +1243,22 @@ function startEntityDrag(e, ent, el, kind) {
       persist();
       toast(kind === 'char' ? 'POSITION UPDATED' : 'PING MOVED', kind === 'ping' ? 'amber' : '');
       renderSidebar();
-    } else {
+    } else if (ev.pointerType !== 'touch' || Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 12) {
       const p = evPos(ev);
       if (kind === 'char') { sel = { type: 'char', id: ent.id }; renderMarkers(); renderSidebar(); openEditPop(ent, p.px, p.py); }
       else { sel = { type: 'ping', id: ent.id }; renderPings(); renderSidebar(); openPingPop(ent, p.px, p.py); }
     }
     dragSnap = null;
   };
+  const onCancel = () => {
+    el.removeEventListener('pointermove', onMove);
+    el.removeEventListener('pointerup', onUp);
+    el.removeEventListener('pointercancel', onCancel);
+    el.classList.remove('drag');
+    if (start.moved) { pushHistory(dragSnap); persist(); renderSidebar(); }
+    dragSnap = null;
+  };
+  el.addEventListener('pointercancel', onCancel);
   el.addEventListener('pointermove', onMove);
   el.addEventListener('pointerup', onUp);
 }
@@ -1568,18 +1579,44 @@ function setMode(m) {
 /* ───────── viewport interaction ───────── */
 function wireViewport() {
   let pan = null;
+  const touches = new Map();
+  let pinch = null, touchGesture = false;
+  const touchPair = () => {
+    const [a, b] = [...touches.values()];
+    return { px: (a.px + b.px) / 2, py: (a.py + b.py) / 2,
+      distance: Math.max(1, Math.hypot(a.px - b.px, a.py - b.py)) };
+  };
 
   viewport.addEventListener('pointerdown', e => {
     if (e.target.closest('#pop, #zoomCtl, .mk, .pg, .loc')) return;
     if (e.button !== 0 && e.button !== 1) return;
     const { px, py } = evPos(e);
-    pan = { px, py, tx: view.tx, ty: view.ty, moved: false };
+    if (e.pointerType === 'touch') {
+      touches.set(e.pointerId, { px, py });
+      if (touches.size >= 2) {
+        const pair = touchPair();
+        pinch = { ...pair, z: view.z, anchor: toMap(pair.px, pair.py) };
+        touchGesture = true; pan = null; closePop();
+        viewport.setPointerCapture(e.pointerId);
+        return;
+      }
+    }
+    pan = { px, py, tx: view.tx, ty: view.ty, moved: false, pointerId: e.pointerId };
     viewport.setPointerCapture(e.pointerId);
   });
 
   viewport.addEventListener('pointermove', e => {
     const { px, py } = evPos(e);
-    if (pan) {
+    if (touches.has(e.pointerId)) touches.set(e.pointerId, { px, py });
+    if (pinch && touches.size >= 2) {
+      const pair = touchPair();
+      view.z = clamp(pinch.z * pair.distance / pinch.distance, minZ(), maxZ());
+      view.tx = pair.px - pinch.anchor.x * view.z;
+      view.ty = pair.py - pinch.anchor.y * view.z;
+      applyView();
+      return;
+    }
+    if (pan && pan.pointerId === e.pointerId) {
       if (!pan.moved && Math.hypot(px - pan.px, py - pan.py) > 4) { pan.moved = true; closePop(); viewport.classList.add('panning'); }
       if (pan.moved) { view.tx = pan.tx + (px - pan.px); view.ty = pan.ty + (py - pan.py); applyView(); }
     }
@@ -1593,7 +1630,21 @@ function wireViewport() {
     }
   });
 
+  const cancelTouch = e => {
+    touches.delete(e.pointerId);
+    pinch = null; pan = null;
+    viewport.classList.remove('panning');
+    // Never turn a pinch or interrupted drag into a placement tap.
+    touchGesture = touches.size > 0;
+  };
+  viewport.addEventListener('pointercancel', cancelTouch);
+  viewport.addEventListener('lostpointercapture', e => {
+    if (touches.has(e.pointerId) || pan?.pointerId === e.pointerId) cancelTouch(e);
+  });
   viewport.addEventListener('pointerup', e => {
+    touches.delete(e.pointerId);
+    if (touchGesture) { cancelTouch(e); return; }
+    if (pan && pan.pointerId !== e.pointerId) return;
     const wasPan = pan;
     pan = null;
     viewport.classList.remove('panning');

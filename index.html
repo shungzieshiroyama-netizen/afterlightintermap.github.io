@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
 <title>AFTERLIGHT // STORY MAP</title>
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -56,8 +56,8 @@
 
     <div class="tb-spacer"></div>
 
-    <button class="tb-btn" id="btnUndo" title="Undo (Ctrl+Z)"><span class="ico">↶</span></button>
-    <button class="tb-btn" id="btnRedo" title="Redo (Ctrl+Y)"><span class="ico">↷</span></button>
+    <button class="tb-btn" id="btnUndo" aria-label="Undo" title="Undo (Ctrl+Z)"><span class="ico">↶</span></button>
+    <button class="tb-btn" id="btnRedo" aria-label="Redo" title="Redo (Ctrl+Y)"><span class="ico">↷</span></button>
 
     <div class="tb-sep"></div>
 
@@ -73,10 +73,16 @@
 
     <div class="tb-sep"></div>
 
-    <button class="tb-btn" id="btnTheme" title="Toggle interface theme"><span class="ico">◐</span></button>
+    <button class="tb-btn" id="btnTheme" aria-label="Change theme" title="Toggle interface theme"><span class="ico">◐</span></button>
     <button class="tb-btn" id="btnLive" title="Live sync — share this board in real time"><span class="ico">◉</span> LIVE</button>
-    <button class="tb-btn" id="btnHelp" title="Keyboard shortcuts (?)"><span class="ico">?</span></button>
+    <button class="tb-btn" id="btnHelp" aria-label="Help" title="Keyboard shortcuts (?)"><span class="ico">?</span></button>
+    <button class="tb-btn mobile-only" id="btnMobileMore" aria-controls="mobileTools" aria-expanded="false" aria-label="More tools"><span class="ico">•••</span> MORE</button>
   </header>
+
+  <section id="mobileTools" class="hidden" aria-label="Map tools">
+    <div class="mobile-panel-head"><span>MAP TOOLS</span><button id="mobileToolsClose" aria-label="Close tools">✕</button></div>
+    <div id="mobileToolsBody"></div>
+  </section>
 
   <!-- ══════════ MAIN ══════════ -->
   <div id="main">
@@ -125,7 +131,8 @@
     </div>
 
     <!-- ══════════ SIDEBAR ══════════ -->
-    <aside id="sidebar" data-tab="pings">
+    <aside id="sidebar" data-tab="pings" aria-label="Scenes, characters and locations">
+      <div class="mobile-panel-head mobile-only"><span>SCENES &amp; CAST</span><button id="mobileSidebarClose" aria-label="Close scene list">✕</button></div>
       <div class="side-tabs" id="sideTabs">
         <button class="side-tab on" data-tab="pings">STORY PINGS</button>
         <button class="side-tab" data-tab="chars">CHARACTERS</button>
@@ -260,6 +267,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script src="app.js"></script>
+<script src="mobile.js"></script>
 <script src="sync.js"></script>
 <script>
 /* last-resort loader dismissal (app.js handles the normal path) */
