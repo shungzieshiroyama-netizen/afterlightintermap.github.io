@@ -377,7 +377,7 @@ const R = (ctx, code) => vm.runInContext(code, ctx);
       const stale = { id: '${pid}', chars: [], label: 'ASSIGN', x: 6, y: 6 };  // popup captured a stale object
       const el = document.createElement('div');
       popInvolvedChars(el, stale);
-      const click = (soak) => { (function walk(e){ for (const c of e.children) { walk(c); if (c.className && String(c.className).includes('pc') && (c.innerHTML || '').includes(soak)) c.dispatch('click'); } })(el); };
+      const click = (soak) => { (function walk(e){ for (const c of e.children) { walk(c); if (c.className && String(c.className).includes('pc') && (c.textContent || c.innerHTML || '').includes(soak)) c.dispatch('click'); } })(el); };
       click('ALPHA'); click('BETA');
       const live = curData().pings.find(x => x.id === '${pid}');
       return (live.chars || []).length;
@@ -406,6 +406,72 @@ const R = (ctx, code) => vm.runInContext(code, ctx);
     ok(R(A, `pingLayer.children.some(c => (c.dataset.id === '${hid[1]}' || '').length) || pingLayer.children.some(c => c.dataset.id === '${hid[1]}')`), 'SHOW ALL: ping back on map');
     R(A, `deleteChar('${hid[0]}'); deletePing('${hid[1]}'); deleteLoc('${hid[2]}'); switchDate(''); renderAll(); persistNow();`);
   }
+
+  console.log('— scene cast: roster-only creation, validation, selection, rename and sync —');
+  const cast = R(A, `(function () {
+    switchDate('');
+    const scene = addPing(20, 30); scene.label = 'CAST TEST';
+    const c = createCastCharacter('  Mira  ', scene.id);
+    return { id: c.id, scene: scene.id };
+  })()`);
+  ok(R(A, `curData().characters.find(c => c.id === '${cast.id}').name`) === 'Mira', 'cast name trimmed');
+  ok(R(A, `curData().characters.find(c => c.id === '${cast.id}').x`) === undefined, 'new cast has no map position');
+  ok(R(A, `markerLayer.children.length`) === 0, 'cast creation never renders a marker');
+  ok(R(A, `createCastCharacter('mIRA').id`) === cast.id, 'duplicate names reuse the existing cast member');
+  ok(R(A, `createCastCharacter('   ')`) === null, 'blank cast name rejected');
+  ok(R(A, `createCastCharacter('Missing Scene', 'nonexistent')`) === null, 'deleted scene cannot create an orphan cast member');
+  ok(R(A, `setSceneCharacter('${cast.scene}', '${cast.id}', false)`), 'cast member can leave a scene');
+  ok(!R(A, `setSceneCharacter('${cast.scene}', 'missing', true)`), 'unknown cast ID rejected');
+  ok(R(A, `setSceneCharacter('${cast.scene}', '${cast.id}', true)`), 'existing cast member can join a scene');
+  ok(!R(A, `setSceneCharacter('${cast.scene}', '${cast.id}', true)`), 'repeated selection is a no-op');
+  R(A, `createCastCharacter('Other');`);
+  ok(!R(A, `renameCastCharacter('${cast.id}', ' other ')`), 'rename rejects duplicate names');
+  ok(R(A, `renameCastCharacter('${cast.id}', 'Mira Vale')`), 'cast can be renamed');
+  ok(R(A, `pingChars(curData().pings.find(p => p.id === '${cast.scene}'))`).includes('Mira Vale'), 'scene credits show the renamed character');
+  const picker = R(A, `(function () {
+    const root = document.createElement('div');
+    popInvolvedChars(root, { id: '${cast.scene}', chars: [] });
+    const wrap = root.children[0], search = wrap.children[1], box = wrap.children[2], add = wrap.children[3];
+    search.value = 'Mira'; search.dispatch('input');
+    const filtered = box.children.length === 1 && box.children[0].textContent.includes('Mira Vale');
+    search.value = 'New Face'; search.dispatch('input');
+    const offered = !add.hidden;
+    add.dispatch('click');
+    const c = curData().characters.find(c => c.name === 'New Face');
+    const attached = curData().pings.find(p => p.id === '${cast.scene}').chars.includes(c?.id);
+    state.data = JSON.parse(JSON.stringify(state.data));
+    search.value = 'Mira'; search.dispatch('input'); box.children[0].dispatch('click');
+    const removed = !curData().pings.find(p => p.id === '${cast.scene}').chars.includes('${cast.id}');
+    setSceneCharacter('${cast.scene}', '${cast.id}', true);
+    return { filtered, offered, attached, removed };
+  })()`);
+  ok(picker.filtered, 'picker filters cast by name');
+  ok(picker.offered && picker.attached, 'picker creates and attaches a missing character');
+  ok(picker.removed, 'picker toggles current scene data after sync object replacement');
+  R(A, `persistNow();`);
+  await sleep(1200);
+  ok(R(B, `curData().characters.some(c => c.id === '${cast.id}' && c.name === 'Mira Vale')`), 'roster-only cast syncs to second client');
+  R(B, `switchDate('');`);
+  ok(R(B, `curData().pings.find(p => p.id === '${cast.scene}')?.chars.includes('${cast.id}')`), 'scene cast selection syncs to second client');
+
+  console.log('— deletion scrubs dated scene credits and undo restores them —');
+  const dated = R(A, `(function () {
+    switchDate('2088-01-01');
+    const p = addPing(2, 4); setSceneCharacter(p.id, '${cast.id}', true);
+    switchDate(''); return p.id;
+  })()`);
+  R(A, `deleteChar('${cast.id}');`);
+  ok(!R(A, `curData().pings.find(p => p.id === '${cast.scene}').chars.includes('${cast.id}')`), 'delete removes active scene credits');
+  ok(!R(A, `state.timeline['2088-01-01'].pingsByMap[state.current].find(p => p.id === '${dated}').chars.includes('${cast.id}')`), 'delete removes dated scene credits');
+  R(A, `undo();`);
+  ok(R(A, `curData().characters.some(c => c.id === '${cast.id}')`), 'undo restores roster');
+  ok(R(A, `state.timeline['2088-01-01'].pingsByMap[state.current].find(p => p.id === '${dated}').chars.includes('${cast.id}')`), 'undo restores dated scene credits');
+  R(A, `togglePingHidden(state.current, '2088-01-01', '${dated}');`);
+  ok(R(A, `state.timeline['2088-01-01'].pingsByMap[state.current][0].hidden`), 'off-date hide is applied');
+  R(A, `undo();`);
+  ok(!R(A, `state.timeline['2088-01-01'].pingsByMap[state.current][0].hidden`), 'undo restores off-date visibility');
+  R(A, `deleteGlobalPing(state.current, '2088-01-01', '${dated}'); undo();`);
+  ok(R(A, `state.timeline['2088-01-01'].pingsByMap[state.current].some(p => p.id === '${dated}')`), 'undo restores an off-date scene deletion');
 
   console.log('— echo-convergence: no dangling diff on either client after quiet period —');
   await sleep(1000);

@@ -781,3 +781,15 @@ body.light{--pgc-ong:#d4a017;--pgc-fin:#68745a}
 /* screen-space marker HUD — markers never live inside the scaled world, so they stay pin-sharp at any zoom */
 #hud{position:absolute;inset:0;z-index:12;pointer-events:none;overflow:hidden}
 .ping-row.is-hidden .ping-name{opacity:.4;text-decoration:line-through}
+
+/* Scene cast picker: readable, keyboard-accessible, bounded for large rosters. */
+.cast-search{margin-bottom:8px}
+.inv-chips{max-height:170px;overflow-y:auto;padding:2px}
+.pc.inv{font-size:11px;min-height:30px;opacity:.75}
+.pc.inv:focus-visible,.cast-create:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.cast-create{margin-top:8px;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.cast-create[hidden]{display:none}
+.side-foot.s-chars{flex-wrap:wrap}
+#btnAddCast{flex-basis:100%;color:var(--acc);padding:8px}
+#pop{max-width:calc(100% - 16px);max-height:calc(100% - 16px);overflow-y:auto}
+.pc.inv{max-width:100%;overflow-wrap:anywhere;text-align:left}
