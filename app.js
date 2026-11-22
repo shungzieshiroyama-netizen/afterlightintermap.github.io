@@ -45,7 +45,7 @@ const pop = $('#pop'), veil = $('#veil'), hint = $('#hint'), coordsBox = $('#coo
 
 /* ───────── state ───────── */
 let state = null;
-let mode = 'add';                 // 'select' | 'add' | 'ping'
+let mode = 'select';                 // 'select' | 'add' | 'ping'
 let sel = null;                   // {type:'char'|'ping', id}
 let dragSnap = null;              // snapshot taken when a marker drag starts
 let suppressMapClick = false;
@@ -459,29 +459,10 @@ function toast(msg, cls = '') {
 
 /* ───────── marker rendering ───────── */
 function renderMarkers() {
-  charIndex = new Map();
+  // Keep the roster for story-ping credits and existing saved boards.
+  // Character positions are no longer displayed on the map.
+  charIndex = new Map(curData().characters.map(c => [c.id, c]));
   markerLayer.innerHTML = '';
-  markerLayer.classList.toggle('nolabels', !state.labels);
-  const q = $('#searchInput').value.trim().toLowerCase();
-  const noDate = activeKey() === '';   // NO DATE = atlas: locations & pings only
-  for (const c of curData().characters) {
-    charIndex.set(c.id, c);
-    if (c.hidden || c.unplaced || noDate) continue;
-    const el = document.createElement('div');
-    el.className = `mk shape-${c.shape || 'circle'}${sel && sel.type === 'char' && sel.id === c.id ? ' sel' : ''}${c.avatar ? ' has-avatar' : ''}${q && !c.name.toLowerCase().includes(q) ? ' dimmed' : ''}`;
-    el.dataset.wx = c.x; el.dataset.wy = c.y; placeMarker(el);
-    el.style.setProperty('--c', c.color || COLORS[0]);
-    el.dataset.id = c.id;
-    const dot = document.createElement('div');
-    dot.className = 'mk-dot';
-    if (c.avatar) { const im = document.createElement('img'); im.src = c.avatar; im.draggable = false; dot.appendChild(im); }
-    const lab = document.createElement('div');
-    lab.className = 'mk-label'; lab.textContent = c.name;
-    el.append(dot, lab);
-    el.addEventListener('pointerdown', e => startEntityDrag(e, c, el, 'char'));
-    markerLayer.appendChild(el);
-  }
-  layoutLabels();
 }
 
 function renderPings() {
@@ -719,37 +700,16 @@ function renderSidebar() {
   const chars = d.characters.filter(c => !q || c.name.toLowerCase().includes(q));
   const noDate = activeKey() === '';
   if (!chars.length) {
-    list.innerHTML = `<div class="empty-msg">${q ? 'NO MATCHES FOUND'
-      : noDate ? 'CHARACTERS LIVE ON DATES —<br>PICK A DATE IN ◷ CAL TO PLACE THEM'
-               : 'NO CHARACTERS ON THIS MAP —<br>CLICK THE MAP TO PLACE ONE'}</div>`;
+    list.innerHTML = `<div class="empty-msg">${q ? 'NO MATCHES FOUND' : 'NO CHARACTERS IN THIS ROSTER'}</div>`;
   }
   for (const c of chars) {
-    const unplaced = c.unplaced || noDate;
     const row = document.createElement('div');
-    row.className = 'char-row' + (sel && sel.type === 'char' && sel.id === c.id ? ' on' : '') + (c.hidden ? ' is-hidden' : '') + (unplaced ? ' is-unplaced' : '');
-    row.innerHTML = `
-      <span class="char-dot ${c.shape === 'diamond' ? 'dia' : c.shape === 'square' ? 'sq' : ''}" style="--c:${esc(c.color)};background:${esc(c.color)}"></span>
-      <span class="char-name">${esc(c.name)}</span>
-      <span class="row-btns">
-        ${unplaced
-          ? `<button class="rb place" data-act="place" title="${noDate ? 'Pick a date to place this character' : `Place on this date (${esc(activeKey())})`}">◎</button>`
-          : `<button class="rb" data-act="locate" title="Centre on character">⌖</button>`}
-        ${noDate ? '' : `<button class="rb" data-act="dup" title="Duplicate marker">⧉</button>`}
-        <button class="rb" data-act="hide" title="Hide / show on map">👁</button>
-        <button class="rb warn" data-act="del" title="Remove character">✕</button>
-      </span>`;
+    row.className = 'char-row';
+    row.innerHTML = `<span class="char-name">${esc(c.name)}</span>
+      <span class="row-btns"><button class="rb warn" data-act="del" title="Remove character">✕</button></span>`;
     row.addEventListener('click', e => {
-      const act = e.target.closest('.rb')?.dataset.act;
-      if (act === 'hide')  { pushHistory(); c.hidden = !c.hidden; persist(); renderMarkers(); renderSidebar(); return; }
-      if (act === 'del')   { deleteChar(c.id); return; }
-      if (act === 'dup')   { duplicateChar(c.id); return; }
-      if (noDate) { guidePickDate(c); return; }
-      if (act === 'place') { beginPlacement(c.id); return; }
-      if (c.unplaced) { beginPlacement(c.id); return; }
-      selectChar(c.id);
-      centerOn(c.x, c.y);
+      if (e.target.closest('.rb')?.dataset.act === 'del') deleteChar(c.id);
     });
-    if (pendingPlace === c.id) row.classList.add('is-placing');
     list.appendChild(row);
   }
   const llist = $('#locList');
@@ -1504,12 +1464,10 @@ function confirmClear() {
 function showHelp() {
   openModal('KEYBOARD SHORTCUTS', `<table>
     <tr><td><kbd>V</kbd></td><td>Select / pan mode</td></tr>
-    <tr><td><kbd>N</kbd></td><td>Add-character mode (click map)</td></tr>
     <tr><td><kbd>B</kbd></td><td>Location mode (fixed place markers)</td></tr>
     <tr><td><kbd>P</kbd></td><td>Ping mode (click map)</td></tr>
     <tr><td><kbd>F</kbd></td><td>Fit map to screen</td></tr>
     <tr><td><kbd>+</kbd> / <kbd>−</kbd></td><td>Zoom in / out</td></tr>
-    <tr><td><kbd>←→↑↓</kbd></td><td>Nudge selected character</td></tr>
     <tr><td><kbd>L</kbd></td><td>Toggle name labels</td></tr>
     <tr><td><kbd>Del</kbd></td><td>Remove selected marker</td></tr>
     <tr><td><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd></td><td>Undo / redo</td></tr>
@@ -1528,6 +1486,7 @@ function applyLabels() {
   pingLayer.classList.toggle('nolabels', !on);
 }
 function setMode(m) {
+  if (!['select', 'loc', 'ping'].includes(m)) return;
   mode = m;
   $$('#modeGroup .mode').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
   viewport.classList.toggle('mode-select', m === 'select');
@@ -1590,11 +1549,7 @@ function wireViewport() {
       renderDrawer(); $('#mapDrawer').classList.remove('hidden');
       return;
     }
-    if (mode === 'add') {
-      if (activeKey() === '') { guidePickDate(null); return; }
-      deselect();
-      openAddPop(m.x, m.y, px, py);
-    } else if (mode === 'loc') {
+    if (mode === 'loc') {
       deselect();
       openAddLocPop(m.x, m.y, px, py);
     } else if (mode === 'ping') {
@@ -1632,7 +1587,6 @@ function wireKeys() {
 
     switch (e.key) {
       case 'v': case 'V': setMode('select'); break;
-      case 'n': case 'N': setMode('add'); break;
       case 'b': case 'B': setMode('loc'); break;
       case 'p': case 'P': setMode('ping'); break;
       case 'f': case 'F': fitView(); break;
@@ -1878,8 +1832,8 @@ function wireLivePanel() {
     const isBuiltin = window.AppSync?.usingBuiltin?.();
     $('#liveConfig').value = isBuiltin ? '' : JSON.stringify(window.AppSync.cfg(), null, 2);
     $('#liveConfig').placeholder = isBuiltin
-      ? 'EMPTY = BUILT-IN PROJECT (schungdar) — works out of the box. Paste your own Firebase config only if you want a private database.'
-      : 'Firebase config override is active';
+      ? 'Leave blank to use the shared database.'
+      : 'Custom database settings';
     updateLivePanelStatus();
   };
   const close = () => panel.classList.add('hidden');
@@ -1901,20 +1855,20 @@ function wireLivePanel() {
       } catch { toast('CONFIG IS NOT VALID JSON', 'red'); return; }
       if (!parsed.databaseURL && !parsed.projectId) { toast('CONFIG MISSING databaseURL / projectId', 'red'); return; }
       window.AppSync.saveCfg(parsed, board);
-      toast('USING CUSTOM FIREBASE PROJECT', 'amber');
+      toast('CUSTOM DATABASE SELECTED', 'amber');
     } else {
       window.AppSync.saveCfg(null, board);   // built-in project
     }
     if (window.AppSync.isConnected()) window.AppSync.disconnect();
     const r = await window.AppSync.connect(null, board);
     updateLivePanelStatus();
-    if (r.ok) toast(`LIVE — EVERYONE ON “${board.toUpperCase()}” SEES EVERYTHING`, 'green');
+    if (r.ok) toast(`CONNECTED TO “${board.toUpperCase()}”`, 'green');
   });
   $('#liveDisconnect').addEventListener('click', () => { window.AppSync.disconnect(); updateLivePanelStatus(); });
   $('#liveForget').addEventListener('click', () => {
     window.AppSync.disconnect(); window.AppSync.saveCfg(null);
     $('#liveConfig').value = ''; updateLivePanelStatus();
-    toast('BACK TO BUILT-IN PROJECT', 'green');
+    toast('SHARED DATABASE RESTORED', 'green');
   });
 }
 function updateLivePanelStatus() {
@@ -1924,8 +1878,8 @@ function updateLivePanelStatus() {
   const on = S?.isConnected?.();
   const peers = S?.peerCount?.() || 0;
   el.innerHTML = on
-    ? `<span class="live-pill on">● LIVE</span> board <b>“${S.boardId()}”</b> — ${peers} operator${peers === 1 ? '' : 's'} online. Changes appear on every screen in ~1 second.`
-    : `<span class="live-pill cfg">● READY</span> live sync is built-in — just pick a board code and press <b>CONNECT ▸ GO LIVE</b>.`;
+    ? `<span class="live-pill on">● LIVE</span> board <b>“${esc(S.boardId())}”</b> — ${peers} operator${peers === 1 ? '' : 's'} online. Map changes are shared with this board.`
+    : `<span class="live-pill cfg">● READY</span> Enter a board code to connect.`;
 }
 
 /* ───────── init ───────── */
@@ -1939,10 +1893,10 @@ function init() {
   wireViewport();
   wireToolbar();
   wireKeys();
-  setMode('add');
+  setMode('select');
   updateUndoButtons();
   switchMap(state.current, { silent: true, skipViewSave: true });
-  if (!state.hintDone) hint.classList.remove('hidden');
+  hint.classList.add('hidden');
   applyLabels();
   setSync(false);
   persist();

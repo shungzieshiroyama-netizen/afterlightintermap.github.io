@@ -4,8 +4,8 @@
 'use strict';
 const vm = require('vm');
 const fs = require('fs');
-const APP = fs.readFileSync('/home/user/afterlight-tracker/app.js', 'utf8');
-const SYN = fs.readFileSync('/home/user/afterlight-tracker/sync.js', 'utf8');
+const APP = fs.readFileSync(require('path').join(__dirname, '../app.js'), 'utf8');
+const SYN = fs.readFileSync(require('path').join(__dirname, '../sync.js'), 'utf8');
 
 /* ───── fake realtime database (shared store, per-URL Db with listeners) ───── */
 const sharedStores = {};   // databaseURL -> plain object
@@ -190,17 +190,13 @@ const R = (ctx, code) => vm.runInContext(code, ctx);
   const pingA = R(A, `curData().pings[0].id`);
   ok(R(A, `curData().characters.length`) === 1, 'A live: 1 char on date');
   ok(R(A, `curData().pings.length`) === 1, 'A live: 1 ping on date');
-  ok(R(A, `markerLayer.children.length`) === 1, 'A on date: char marker rendered');
+  ok(R(A, `markerLayer.children.length`) === 0, 'A on date: obsolete character markers not rendered');
   ok(R(A, `dateHasPing('2087-03-15')`), 'A: dateHasPing true (local active uses live pings)');
 
   console.log('— markers in screen-space HUD (crisp at any zoom) + far-zoom at 25% —');
   R(A, `imgNW = 1000; imgNH = 600; view.z = 0.776; applyView();`);
   ok(!R(A, `hud.classList.contains('far-zoom')`), 'A at fit zoom: markers shown');
-  {
-    const left = R(A, `markerLayer.children[0].style.left`);
-    const expect = R(A, `Math.round(view.tx + curData().characters[0].x * view.z) + 'px'`);
-    ok(left === expect, 'marker positioned in screen-space pixels');
-  }
+  ok(R(A, `markerLayer.children.length`) === 0, 'character markers remain absent at fit zoom');
   R(A, `view.z = 0.26; applyView();`);
   ok(!R(A, `hud.classList.contains('far-zoom')`), 'A at 26% zoom: all markers shown');
   R(A, `view.z = 0.24; applyView();`);
@@ -301,7 +297,7 @@ const R = (ctx, code) => vm.runInContext(code, ctx);
   // position survives switching back to the date it belongs to
   R(A, `switchDate('2087-03-15');`);
   ok(R(A, `curData().characters.find(c => c.id === '${novaA}').x`) === 60, 'A: back on its date, NOVA position restored');
-  ok(R(A, `markerLayer.children.length`) === 1, 'A: NOVA visible again on its date');
+  ok(R(A, `markerLayer.children.length`) === 0, 'A: character markers stay removed when returning to a date');
   await sleep(1400);
   R(B, `switchDate('2087-03-15'); renderAll();`);
   ok(R(B, `curData().characters.find(c => c.id === '${novaA}')?.x`) === 60, 'B: NOVA converged at x=60 on its date');
@@ -405,7 +401,7 @@ const R = (ctx, code) => vm.runInContext(code, ctx);
     ok(!R(A, `locLayer.children.some(c => c.dataset.id === '${hid[2]}')`), 'hidden location not rendered');
     R(A, `$('#btnShowAll').dispatch('click');`);
     await sleep(120);
-    ok(R(A, `markerLayer.children.some(c => c.dataset.id === '${hid[0]}')`), 'SHOW ALL: character back on map');
+    ok(!R(A, `markerLayer.children.some(c => c.dataset.id === '${hid[0]}')`), 'SHOW ALL: character markers stay removed');
     ok(R(A, `locLayer.children.some(c => c.dataset.id === '${hid[2]}')`), 'SHOW ALL: location back on map');
     ok(R(A, `pingLayer.children.some(c => (c.dataset.id === '${hid[1]}' || '').length) || pingLayer.children.some(c => c.dataset.id === '${hid[1]}')`), 'SHOW ALL: ping back on map');
     R(A, `deleteChar('${hid[0]}'); deletePing('${hid[1]}'); deleteLoc('${hid[2]}'); switchDate(''); renderAll(); persistNow();`);

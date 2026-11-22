@@ -28,7 +28,7 @@ open the page → you're live.
 
 Every screen on the same board updates in about a second:
 
-- place / move / rename / hide / delete **characters**
+- existing **character roster** data and story-ping credits (character map markers and placement controls have been removed)
 - **near-live dragging** — others watch the marker glide
 - create / rename / recolor / delete **locations**
 - **pings** — including their auto-expiry, simultaneously for everyone
@@ -42,7 +42,7 @@ Every screen on the same board updates in about a second:
   only fixed Locations and story pings show. All dated pings appear as
   dashed ghost markers with their date under the label (and in the sidebar
   list). Click one → ◷ PROCEED TO DATE jumps straight into that timeline
-  and lets you place characters
+  to view its story pings
 - new joiners receive the full shared reality first, and anything that
   exists only on their device is uploaded for everyone
 
@@ -58,7 +58,7 @@ re-syncs when connectivity returns.
 
 Want your markers on a database you own? Create a free Firebase project with
 a **Realtime Database** (test mode rules), then paste its config in
-**LIVE → ADVANCED: CUSTOM FIREBASE CONFIG**. Empty the box to return to the
+**LIVE → CUSTOM DATABASE (OPTIONAL)**. Empty the box to return to the
 built-in database at any time.
 
 ## 5 · Optional hardening for the built-in database

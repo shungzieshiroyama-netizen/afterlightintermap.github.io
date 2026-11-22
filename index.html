@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AFTERLIGHT // CHARACTER TRACKER</title>
+<title>AFTERLIGHT // STORY MAP</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -37,15 +37,14 @@
       <span class="ico">▦</span> MAPS <span id="mapNameTag" class="tag">—</span>
     </button>
 
-    <button class="tb-btn" id="btnCal" title="Timeline calendar — each date has its own timeline of markers & story pings">
+    <button class="tb-btn" id="btnCal" title="Timeline calendar — browse story pings by date">
       <span class="ico">◷</span> CAL <span id="calTag" class="tag">NO DATE</span>
     </button>
 
     <div class="tb-sep"></div>
 
     <div class="tb-group" id="modeGroup" role="group" title="Interaction mode">
-      <button class="tb-btn mode" data-mode="select" title="Select / pan mode (V)"><span class="ico">⌖</span> SELECT</button>
-      <button class="tb-btn mode active" data-mode="add" title="Click map to place a character (N)"><span class="ico">＋</span> ADD</button>
+      <button class="tb-btn mode active" data-mode="select" title="Select / pan mode (V)"><span class="ico">⌖</span> SELECT</button>
       <button class="tb-btn mode" data-mode="loc" title="Click map to mark a fixed location (B)"><span class="ico">⌂</span> LOC</button>
       <button class="tb-btn mode" data-mode="ping" title="Click map to drop a ping (P)"><span class="ico">⚑</span> PING</button>
     </div>
@@ -63,7 +62,7 @@
     <div class="tb-sep"></div>
 
     <button class="tb-btn" id="btnLabels" title="Show / hide name labels (L)"><span class="ico">≡</span> LABELS</button>
-    <button class="tb-btn" id="btnList" title="Toggle character list panel"><span class="ico">☰</span> LIST</button>
+    <button class="tb-btn" id="btnList" title="Toggle sidebar"><span class="ico">☰</span> LIST</button>
 
     <div class="tb-sep"></div>
 
@@ -101,7 +100,7 @@
       <div id="pop" class="hidden"></div>
 
       <!-- hint chip -->
-      <div id="hint" class="hidden">CLICK THE MAP TO POSITION A CHARACTER</div>
+      <div id="hint" class="hidden">SELECT A MAP TO EXPLORE</div>
 
       <!-- coordinate readout -->
       <div id="coords" class="hidden">
@@ -207,8 +206,8 @@
     <div id="calGrid"></div>
     <div class="cal-foot">
       <span class="cd-dot inline"></span> = date has story pings &nbsp;·&nbsp; outlined = active date
-      <br>Press a date → character positions &amp; pings switch to that timeline. Locations &amp; roster stay.
-      <br>NO DATE = atlas view — characters hidden, all dated pings shown as ghosts.
+      <br>Choose a date to see its story pings. Locations stay visible.
+      <br>NO DATE shows all dated pings as dashed markers.
     </div>
   </div>
 
@@ -226,26 +225,26 @@
   <div id="liveModal" class="hidden">
     <div class="modal-veil"></div>
     <div class="modal-card live-card">
-      <div class="modal-title">◉ LIVE SYNC — INSTANT BOARD SHARING</div>
+      <div class="modal-title">◉ LIVE BOARD</div>
       <div class="modal-body">
         <div id="liveStatus" class="live-status"></div>
         <div class="fld">
-          <label class="fld-lab" for="liveBoard">BOARD CODE (everyone on the same code shares the same markers)</label>
+          <label class="fld-lab" for="liveBoard">BOARD CODE</label>
           <input id="liveBoard" class="fld-inp" type="text" placeholder="public" maxlength="40" spellcheck="false" autocomplete="off">
-          <div class="fld-help">Share the board code with your group — e.g. <b>afterlight-crew</b>. You can also link directly: <b>your-url.netlify.app/?board=afterlight-crew</b></div>
+          <div class="fld-help">Use the same code as your group to share pings and locations.</div>
         </div>
         <div class="fld">
-          <label class="fld-lab" for="liveName">YOUR CALL SIGN (shown on presence counter)</label>
+          <label class="fld-lab" for="liveName">YOUR CALL SIGN</label>
           <input id="liveName" class="fld-inp" type="text" placeholder="OPERATOR" maxlength="24" spellcheck="false" autocomplete="off">
         </div>
         <div class="fld">
-          <label class="fld-lab" for="liveConfig">ADVANCED: CUSTOM FIREBASE CONFIG (leave empty to use the built-in database)</label>
+          <label class="fld-lab" for="liveConfig">CUSTOM DATABASE (OPTIONAL)</label>
           <textarea id="liveConfig" class="fld-inp live-ta" spellcheck="false"></textarea>
-          <div class="fld-help">Built-in = the same Firebase project that powers Schungzie's Radar — no setup required. Paste your own config only if you want your markers on a private database.</div>
+          <div class="fld-help">Leave blank to use the shared database. For a separate database, paste your Firebase configuration.</div>
         </div>
       </div>
       <div class="modal-actions">
-        <button class="mini-btn" id="liveForget">FORGET CONFIG</button>
+        <button class="mini-btn" id="liveForget">RESET DATABASE</button>
         <button class="mini-btn" id="liveDisconnect">DISCONNECT</button>
         <button class="mini-btn" id="liveClose">CLOSE</button>
         <button class="mini-btn primary" id="liveConnect">CONNECT ▸ GO LIVE</button>
